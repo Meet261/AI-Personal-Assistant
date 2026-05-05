@@ -1,0 +1,1353 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Personal AI Assistant — UI Samples</title>
+  <style>
+    /* ---------------------------
+       THEME TOKENS (CSS variables)
+       --------------------------- */
+    :root{
+      --bg: #0b0f17;
+      --panel: #111a2b;
+      --panel2: #0f1625;
+      --text: #e8eefc;
+      --muted: #a6b3d6;
+      --faint: rgba(255,255,255,.08);
+      --border: rgba(255,255,255,.10);
+      --shadow: 0 18px 60px rgba(0,0,0,.35);
+      --brand: #7c5cff;
+      --brand2: #3dd6d0;
+      --good: #27d98a;
+      --warn: #ffcc66;
+      --bad: #ff5c7a;
+      --chip: rgba(124,92,255,.18);
+      --chipBorder: rgba(124,92,255,.35);
+      --tableRow: rgba(255,255,255,.03);
+      --focusRing: 0 0 0 4px rgba(124,92,255,.25);
+      --radius: 16px;
+      --radius2: 12px;
+      --font: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+    }
+    /* Calm Light */
+    [data-theme="calm"]{
+      --bg:#f6f8ff;
+      --panel:#ffffff;
+      --panel2:#fbfbff;
+      --text:#0d1633;
+      --muted:#52618a;
+      --faint: rgba(13,22,51,.06);
+      --border: rgba(13,22,51,.10);
+      --shadow: 0 18px 60px rgba(10,20,40,.12);
+      --brand:#5a4bff;
+      --brand2:#12b9b0;
+      --good:#12b76a;
+      --warn:#f59e0b;
+      --bad:#ef4444;
+      --chip: rgba(90,75,255,.10);
+      --chipBorder: rgba(90,75,255,.25);
+      --tableRow: rgba(13,22,51,.03);
+      --focusRing: 0 0 0 4px rgba(90,75,255,.20);
+    }
+    /* Paper / Notion-ish */
+    [data-theme="paper"]{
+      --bg:#faf7f2;
+      --panel:#ffffff;
+      --panel2:#fffdf9;
+      --text:#151515;
+      --muted:#5f5f5f;
+      --faint: rgba(0,0,0,.06);
+      --border: rgba(0,0,0,.10);
+      --shadow: 0 18px 60px rgba(0,0,0,.10);
+      --brand:#111111;
+      --brand2:#6b7280;
+      --good:#16a34a;
+      --warn:#f59e0b;
+      --bad:#dc2626;
+      --chip: rgba(0,0,0,.06);
+      --chipBorder: rgba(0,0,0,.12);
+      --tableRow: rgba(0,0,0,.03);
+      --focusRing: 0 0 0 4px rgba(0,0,0,.10);
+    }
+
+    /* ---------------------------
+       BASE
+       --------------------------- */
+    *{box-sizing:border-box}
+    html,body{height:100%}
+    body{
+      margin:0;
+      font-family:var(--font);
+      background: radial-gradient(1200px 600px at 20% -10%, rgba(124,92,255,.25), transparent 65%),
+                  radial-gradient(900px 480px at 90% 0%, rgba(61,214,208,.18), transparent 60%),
+                  var(--bg);
+      color:var(--text);
+    }
+    a{color:inherit}
+    .wrap{
+      max-width: 1220px;
+      margin: 26px auto;
+      padding: 0 18px 80px;
+    }
+
+    /* ---------------------------
+       TOP BAR (controls)
+       --------------------------- */
+    .topbar{
+      display:flex;
+      gap:12px;
+      align-items:center;
+      justify-content:space-between;
+      padding: 14px 14px;
+      border:1px solid var(--border);
+      background: linear-gradient(180deg, var(--panel), var(--panel2));
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      position: sticky;
+      top: 12px;
+      z-index: 10;
+      backdrop-filter: blur(10px);
+    }
+    .brand{
+      display:flex; align-items:center; gap:10px;
+      min-width: 290px;
+    }
+    .logo{
+      width:34px; height:34px; border-radius: 10px;
+      background: linear-gradient(135deg, var(--brand), var(--brand2));
+      box-shadow: 0 10px 30px rgba(124,92,255,.25);
+    }
+    .brand h1{
+      margin:0; font-size:14px; font-weight:750; letter-spacing:.2px;
+      line-height: 1.2;
+    }
+    .brand .sub{
+      font-size:12px; color:var(--muted);
+      margin-top:2px;
+    }
+
+    .controls{
+      display:flex; gap:10px; align-items:center; flex-wrap: wrap;
+      justify-content:flex-end;
+    }
+
+    .seg{
+      display:flex;
+      border:1px solid var(--border);
+      border-radius: 14px;
+      overflow:hidden;
+      background: rgba(255,255,255,.02);
+    }
+    button{
+      font-family:inherit;
+      color:inherit;
+      border:0;
+      background: transparent;
+      padding: 10px 12px;
+      cursor:pointer;
+      font-weight:650;
+      font-size:12px;
+    }
+    .seg button{
+      border-right:1px solid var(--border);
+      color: var(--muted);
+    }
+    .seg button:last-child{border-right:0}
+    .seg button.active{
+      color: var(--text);
+      background: rgba(124,92,255,.18);
+    }
+
+    .pill{
+      display:flex; align-items:center; gap:8px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+      padding: 9px 12px;
+      border-radius: 999px;
+      font-size:12px;
+      color: var(--muted);
+      white-space:nowrap;
+    }
+    .dot{
+      width:9px; height:9px; border-radius: 50%;
+      background: var(--good);
+      box-shadow: 0 0 0 3px rgba(39,217,138,.18);
+    }
+    .kbd{
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 11px;
+      color: var(--muted);
+      border:1px solid var(--border);
+      background: rgba(255,255,255,.02);
+      padding: 4px 8px;
+      border-radius: 8px;
+      margin-left: 8px;
+    }
+
+    /* ---------------------------
+       SCREEN FRAME
+       --------------------------- */
+    .stage{
+      margin-top: 18px;
+      border-radius: 24px;
+      border: 1px solid var(--border);
+      background: linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.01));
+      padding: 18px;
+      box-shadow: var(--shadow);
+      overflow:hidden;
+    }
+    .screen{
+      display:none;
+      animation: fade .18s ease-out;
+    }
+    .screen.active{display:block;}
+    @keyframes fade{from{opacity:.0; transform: translateY(6px)} to{opacity:1; transform:none}}
+
+    /* ---------------------------
+       COMMON COMPONENTS
+       --------------------------- */
+    .grid{
+      display:grid;
+      gap:14px;
+    }
+    .card{
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      background: linear-gradient(180deg, var(--panel), var(--panel2));
+      padding: 14px;
+    }
+    .card h2{
+      margin:0 0 10px 0;
+      font-size: 13px;
+      letter-spacing:.2px;
+    }
+    .muted{color:var(--muted)}
+    .row{display:flex; gap:12px; align-items:center; justify-content:space-between;}
+    .stack{display:flex; flex-direction:column; gap:10px;}
+    .chips{display:flex; gap:8px; flex-wrap:wrap}
+    .chip{
+      display:inline-flex; align-items:center; gap:8px;
+      border: 1px solid var(--chipBorder);
+      background: var(--chip);
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      color: var(--text);
+    }
+    .chip .miniDot{
+      width:8px; height:8px; border-radius:50%;
+      background: var(--brand2);
+      opacity:.9;
+    }
+    .btn{
+      border:1px solid var(--border);
+      background: rgba(255,255,255,.02);
+      padding: 10px 12px;
+      border-radius: 12px;
+      color: var(--text);
+      font-weight: 700;
+      font-size: 12px;
+    }
+    .btn.primary{
+      background: linear-gradient(135deg, rgba(124,92,255,.95), rgba(61,214,208,.55));
+      border-color: transparent;
+    }
+    .btn:focus{outline:none; box-shadow: var(--focusRing);}
+
+    .list{
+      display:flex; flex-direction:column; gap:10px;
+    }
+    .item{
+      border:1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      background: rgba(255,255,255,.02);
+    }
+    .item .title{font-weight:760; font-size:13px;}
+    .item .meta{margin-top:6px; display:flex; gap:8px; flex-wrap:wrap; color:var(--muted); font-size:12px;}
+
+    .badge{
+      display:inline-flex; align-items:center; gap:6px;
+      padding: 5px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,.02);
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .spark{
+      width:12px; height:12px; display:inline-block;
+      background: radial-gradient(circle at 30% 30%, #fff, rgba(255,255,255,0) 60%),
+                  linear-gradient(135deg, var(--brand), var(--brand2));
+      border-radius: 4px;
+      opacity:.95;
+    }
+
+    /* ---------------------------
+       SCREEN 1: DASHBOARD (cards)
+       --------------------------- */
+    .dash{
+      grid-template-columns: 1.6fr 1fr;
+      align-items:start;
+    }
+    .hero{
+      padding: 16px;
+      background:
+        radial-gradient(700px 220px at 40% -10%, rgba(124,92,255,.32), transparent 70%),
+        linear-gradient(180deg, var(--panel), var(--panel2));
+    }
+    .heroHead{
+      display:flex; align-items:flex-start; justify-content:space-between; gap:12px;
+    }
+    .hero h2{font-size:14px; margin:0}
+    .brief{
+      margin-top: 12px;
+      display:grid;
+      grid-template-columns: 1fr;
+      gap: 10px;
+    }
+    .brief .b{
+      border:1px solid var(--border);
+      background: rgba(255,255,255,.02);
+      border-radius: 14px;
+      padding: 12px;
+    }
+    .b .k{font-size:11px; color:var(--muted); letter-spacing:.2px; text-transform: uppercase;}
+    .b .v{margin-top:6px; font-weight:750;}
+    .b .why{margin-top:6px; color:var(--muted); font-size:12px; line-height:1.4}
+
+    .dashLower{
+      grid-template-columns: 1fr 1fr 1fr;
+    }
+
+    .projRow{
+      display:flex; align-items:center; justify-content:space-between;
+      border:1px solid var(--border);
+      border-radius: 14px;
+      padding: 10px 12px;
+      background: rgba(255,255,255,.02);
+    }
+    .projLeft{display:flex; align-items:center; gap:10px;}
+    .pDot{width:10px; height:10px; border-radius:50%;}
+    .pName{font-weight:760; font-size:13px;}
+    .pMeta{color:var(--muted); font-size:12px; margin-top:2px;}
+    .tiny{font-size:11px; color:var(--muted)}
+    .splitMeta{display:flex; flex-direction:column; align-items:flex-end; gap:4px;}
+
+    .trigger{
+      display:flex; flex-direction:column; gap:10px;
+    }
+    .tRow{
+      border:1px solid var(--border);
+      border-radius: 14px;
+      padding: 12px;
+      background: rgba(255,255,255,.02);
+    }
+    .tRow .top{display:flex; align-items:center; justify-content:space-between;}
+    .tRow .name{font-weight:760; font-size:13px;}
+    .statusOK{color:var(--good); font-weight:750; font-size:12px;}
+    .statusWait{color:var(--warn); font-weight:750; font-size:12px;}
+    .log{
+      margin-top:8px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      font-size: 11px;
+      color: var(--muted);
+      background: rgba(0,0,0,.12);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px;
+      line-height: 1.5;
+      overflow:auto;
+    }
+
+    /* ---------------------------
+       SCREEN 2: KANBAN
+       --------------------------- */
+    .kanbanHead{
+      display:flex; align-items:flex-end; justify-content:space-between; gap:12px;
+      margin-bottom: 12px;
+    }
+    .kanbanHead .title{
+      font-size: 16px;
+      font-weight: 850;
+      letter-spacing:.2px;
+      margin:0;
+    }
+    .board{
+      display:grid;
+      grid-template-columns: repeat(5, minmax(200px, 1fr));
+      gap: 12px;
+      overflow:auto;
+      padding-bottom: 8px;
+    }
+    .col{
+      border:1px solid var(--border);
+      background: linear-gradient(180deg, var(--panel), var(--panel2));
+      border-radius: 18px;
+      padding: 12px;
+      min-height: 520px;
+    }
+    .col h3{
+      margin:0 0 10px 0;
+      font-size: 12px;
+      letter-spacing:.3px;
+      text-transform: uppercase;
+      color: var(--muted);
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+    }
+    .count{
+      border:1px solid var(--border);
+      border-radius: 999px;
+      padding: 3px 8px;
+      font-size: 11px;
+      color: var(--muted);
+      background: rgba(255,255,255,.02);
+    }
+    .kcard{
+      border:1px solid var(--border);
+      border-radius: 16px;
+      padding: 10px;
+      background: rgba(255,255,255,.02);
+      margin-bottom: 10px;
+    }
+    .kcard .t{font-weight:780; font-size:13px;}
+    .kcard .m{margin-top:6px; display:flex; flex-wrap:wrap; gap:8px; color:var(--muted); font-size:12px;}
+
+    /* ---------------------------
+       SCREEN 3: TABLE / ISSUE TRACKER
+       --------------------------- */
+    .tableHead{
+      display:flex; gap:12px; align-items:center; justify-content:space-between;
+      margin-bottom: 12px;
+    }
+    .tableHead h2{margin:0; font-size:16px; font-weight:850;}
+    table{
+      width:100%;
+      border-collapse:separate;
+      border-spacing:0;
+      overflow:hidden;
+      border-radius: 18px;
+      border:1px solid var(--border);
+      background: linear-gradient(180deg, var(--panel), var(--panel2));
+    }
+    thead th{
+      text-align:left;
+      font-size:12px;
+      color: var(--muted);
+      letter-spacing:.2px;
+      padding: 12px;
+      border-bottom:1px solid var(--border);
+      background: rgba(255,255,255,.02);
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+    tbody td{
+      padding: 12px;
+      border-bottom:1px solid var(--border);
+      font-size:13px;
+      vertical-align: top;
+    }
+    tbody tr{background: transparent;}
+    tbody tr:nth-child(2n){background: var(--tableRow);}
+    .prio{
+      display:flex; align-items:center; gap:8px;
+    }
+    .bar{
+      width:68px; height:8px; border-radius: 99px;
+      background: rgba(255,255,255,.08);
+      border: 1px solid var(--border);
+      overflow:hidden;
+    }
+    .bar > span{display:block; height:100%; background: linear-gradient(90deg, var(--brand), var(--brand2));}
+    .eff{font-weight:850;}
+    .due.bad{color:var(--bad); font-weight:800;}
+    .due.warn{color:var(--warn); font-weight:800;}
+    .due.ok{color:var(--good); font-weight:800;}
+
+    /* ---------------------------
+       SCREEN 4: CHECK-IN WIZARD
+       --------------------------- */
+    .wizard{
+      display:grid;
+      grid-template-columns: 1fr 420px;
+      gap: 14px;
+      align-items:start;
+    }
+    .stepper{
+      border:1px solid var(--border);
+      border-radius: 18px;
+      background: linear-gradient(180deg, var(--panel), var(--panel2));
+      padding: 14px;
+      min-height: 560px;
+    }
+    .stepTop{
+      display:flex; align-items:center; justify-content:space-between; gap:12px;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 10px;
+      margin-bottom: 12px;
+    }
+    .stepTop h2{margin:0; font-size:15px; font-weight:900;}
+    .progress{
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .q{
+      font-size:13px;
+      font-weight:820;
+      margin: 0 0 8px 0;
+    }
+    .field{
+      border:1px solid var(--border);
+      background: rgba(255,255,255,.02);
+      border-radius: 14px;
+      padding: 10px;
+      min-height: 120px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height:1.5;
+    }
+    .energy{
+      display:flex; gap:8px; margin-top: 10px;
+    }
+    .energy .e{
+      width:44px; height:44px;
+      border-radius: 14px;
+      border:1px solid var(--border);
+      background: rgba(255,255,255,.02);
+      display:flex; align-items:center; justify-content:center;
+      font-weight:900; color: var(--muted);
+    }
+    .energy .e.active{
+      background: rgba(124,92,255,.18);
+      border-color: rgba(124,92,255,.45);
+      color: var(--text);
+    }
+    .wizBtns{
+      display:flex; gap:10px; margin-top: 14px;
+    }
+    .side{
+      display:flex; flex-direction:column; gap:14px;
+    }
+    .aiPanel h3{
+      margin:0 0 8px 0;
+      font-size: 12px;
+      letter-spacing:.3px;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+    .aiPanel .callout{
+      border:1px solid var(--border);
+      background: rgba(255,255,255,.02);
+      border-radius: 16px;
+      padding: 12px;
+    }
+    .aiPanel .callout .big{
+      font-weight: 900;
+      margin-bottom: 6px;
+    }
+    .aiPanel .callout .small{
+      color: var(--muted);
+      font-size: 12px;
+      line-height:1.45;
+    }
+
+    /* ---------------------------
+       SCREEN 5: COMMAND PALETTE
+       --------------------------- */
+    .paletteDemo{
+      display:grid;
+      grid-template-columns: 1.2fr .8fr;
+      gap: 14px;
+      align-items:start;
+    }
+    .mockApp{
+      border:1px solid var(--border);
+      border-radius: 18px;
+      background: linear-gradient(180deg, var(--panel), var(--panel2));
+      min-height: 560px;
+      overflow:hidden;
+      position: relative;
+    }
+    .mockHeader{
+      display:flex; align-items:center; justify-content:space-between;
+      padding: 12px 14px;
+      border-bottom:1px solid var(--border);
+      background: rgba(255,255,255,.02);
+    }
+    .mockHeader .left{
+      display:flex; align-items:center; gap:10px;
+      font-weight: 900;
+      font-size: 13px;
+    }
+    .mockHeader .search{
+      display:flex; align-items:center; gap:10px;
+      color: var(--muted);
+      font-size: 12px;
+      border:1px solid var(--border);
+      background: rgba(255,255,255,.02);
+      padding: 8px 10px;
+      border-radius: 12px;
+      width: 280px;
+      justify-content:space-between;
+    }
+    .mockBody{padding: 14px;}
+    .overlay{
+      position:absolute; inset:0;
+      background: rgba(0,0,0,.35);
+      display:flex;
+      align-items:flex-start;
+      justify-content:center;
+      padding-top: 72px;
+    }
+    .palette{
+      width: min(720px, calc(100% - 28px));
+      border:1px solid var(--border);
+      border-radius: 18px;
+      background: linear-gradient(180deg, var(--panel), var(--panel2));
+      box-shadow: var(--shadow);
+      overflow:hidden;
+    }
+    .paletteTop{
+      padding: 12px;
+      border-bottom:1px solid var(--border);
+      display:flex;
+      gap:10px;
+      align-items:center;
+    }
+    .input{
+      flex:1;
+      border:1px solid var(--border);
+      background: rgba(255,255,255,.02);
+      border-radius: 14px;
+      padding: 12px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height:1.2;
+    }
+    .paletteList{
+      padding: 10px;
+    }
+    .opt{
+      border:1px solid var(--border);
+      border-radius: 16px;
+      background: rgba(255,255,255,.02);
+      padding: 12px;
+      margin-bottom: 10px;
+      display:flex;
+      align-items:flex-start;
+      justify-content:space-between;
+      gap:12px;
+    }
+    .opt .main{
+      display:flex;
+      gap:12px;
+      align-items:flex-start;
+    }
+    .icon{
+      width:36px; height:36px; border-radius: 12px;
+      background: rgba(124,92,255,.18);
+      border: 1px solid rgba(124,92,255,.35);
+      display:flex; align-items:center; justify-content:center;
+      font-weight: 950;
+      color: var(--text);
+    }
+    .opt .t{font-weight:900; font-size:13px; margin:0;}
+    .opt .s{color:var(--muted); font-size:12px; margin-top:4px; line-height:1.35;}
+    .rightChips{display:flex; flex-wrap:wrap; gap:8px; justify-content:flex-end;}
+
+    /* Responsive */
+    @media (max-width: 1040px){
+      .dash{grid-template-columns: 1fr;}
+      .dashLower{grid-template-columns: 1fr;}
+      .wizard{grid-template-columns: 1fr;}
+      .paletteDemo{grid-template-columns: 1fr;}
+      .brand{min-width:auto;}
+      .mockHeader .search{width: 180px;}
+    }
+  </style>
+</head>
+
+<body data-theme="calm">
+  <div class="wrap">
+    <div class="topbar">
+      <div class="brand">
+        <div class="logo"></div>
+        <div>
+          <h1>Personal AI Assistant — UI Samples</h1>
+          <div class="sub">Local-only (Ollama) • Multi-project tasks • 7:00 AM briefing • 9:00 PM check-in</div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <div class="pill" title="Local runtime indicator">
+          <span class="dot"></span>
+          Local AI: Ollama connected
+          <span class="kbd">localhost:11434</span>
+        </div>
+
+        <div class="seg" aria-label="View switcher">
+          <button class="viewBtn active" data-view="dashboard">Dashboard</button>
+          <button class="viewBtn" data-view="kanban">Kanban</button>
+          <button class="viewBtn" data-view="table">Table</button>
+          <button class="viewBtn" data-view="wizard">Check-in</button>
+          <button class="viewBtn" data-view="palette">Cmd+K</button>
+        </div>
+
+        <div class="seg" aria-label="Theme switcher">
+          <button class="themeBtn active" data-theme="calm">Calm</button>
+          <button class="themeBtn" data-theme="paper">Paper</button>
+          <button class="themeBtn" data-theme="midnight">Midnight</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="stage">
+
+      <!-- SCREEN 1: DASHBOARD -->
+      <section class="screen active" id="dashboard">
+        <div class="grid dash">
+          <div class="card hero">
+            <div class="heroHead">
+              <div>
+                <h2>Daily Briefing — 7:00 AM</h2>
+                <div class="muted" style="font-size:12px;margin-top:4px;">
+                  Generated 07:01 • Model: DeepSeek 32B • Based on: tasks + deadlines + yesterday’s check-in summary
+                </div>
+              </div>
+              <div class="chips">
+                <span class="chip"><span class="spark"></span> Auto-generated</span>
+                <span class="chip"><span class="miniDot"></span> Local-only</span>
+              </div>
+            </div>
+
+            <div class="brief">
+              <div class="b">
+                <div class="k">Focus 1</div>
+                <div class="v">Fix login bug (WebApp) — unblock authentication flow</div>
+                <div class="why">High impact and currently blocking two other tasks. Due Friday. Suggested effort: M.</div>
+              </div>
+              <div class="b">
+                <div class="k">Focus 2</div>
+                <div class="v">Prepare release notes (Ops) — reduce last-minute surprises</div>
+                <div class="why">Small effort, improves coordination. Do before noon while energy is higher.</div>
+              </div>
+              <div class="b">
+                <div class="k">Focus 3</div>
+                <div class="v">Pay down “on-hold” tasks (Personal) — remove hidden cognitive load</div>
+                <div class="why">Two items are waiting on simple decisions. Clear them to avoid deadline compression.</div>
+              </div>
+              <div class="b">
+                <div class="k">Defer</div>
+                <div class="v">Refactor settings page (WebApp)</div>
+                <div class="why">Not deadline-driven. Move to next week after the login fix ships.</div>
+              </div>
+            </div>
+          </div>
+
+          <div class="stack">
+            <div class="card">
+              <div class="row">
+                <h2 style="margin:0;">Today</h2>
+                <span class="badge">AI prioritization: On-device (7B)</span>
+              </div>
+              <div class="list" style="margin-top:10px;">
+                <div class="item">
+                  <div class="title">Fix login bug</div>
+                  <div class="meta">
+                    <span class="badge">Project: WebApp</span>
+                    <span class="badge">Due: Fri</span>
+                    <span class="badge">Effort: M</span>
+                    <span class="badge">Priority: 92</span>
+                    <span class="badge"><span class="spark"></span> Parsed from text</span>
+                  </div>
+                </div>
+                <div class="item">
+                  <div class="title">Release notes draft</div>
+                  <div class="meta">
+                    <span class="badge">Project: Ops</span>
+                    <span class="badge">Due: Today</span>
+                    <span class="badge">Effort: S</span>
+                    <span class="badge">Priority: 78</span>
+                  </div>
+                </div>
+                <div class="item">
+                  <div class="title">Decide on gym plan for tomorrow</div>
+                  <div class="meta">
+                    <span class="badge">Project: Personal</span>
+                    <span class="badge">Due: Tomorrow</span>
+                    <span class="badge">Effort: S</span>
+                    <span class="badge">Priority: 55</span>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display:flex; gap:10px; margin-top:12px;">
+                <button class="btn primary" onclick="go('palette')">Add via Cmd+K</button>
+                <button class="btn" onclick="go('table')">Open task list</button>
+              </div>
+            </div>
+
+            <div class="card">
+              <div class="row">
+                <h2 style="margin:0;">Scheduled Triggers</h2>
+                <span class="badge">Cron → App API</span>
+              </div>
+              <div class="trigger" style="margin-top:10px;">
+                <div class="tRow">
+                  <div class="top">
+                    <div class="name">7:00 AM — Morning briefing</div>
+                    <div class="statusOK">Last run: OK</div>
+                  </div>
+                  <div class="tiny" style="margin-top:6px;">Next run: tomorrow 7:00 AM • Model: 32B</div>
+                  <div class="log">07:01:11  POST /api/briefing  200  (1.8s)
+07:01:11  model=deepseek-32b  tokens=1,244</div>
+                </div>
+                <div class="tRow">
+                  <div class="top">
+                    <div class="name">9:00 PM — Check-in prompt</div>
+                    <div class="statusWait">Scheduled</div>
+                  </div>
+                  <div class="tiny" style="margin-top:6px;">Next: today 9:00 PM • Summary after completion • Model: 32B</div>
+                  <div style="display:flex; gap:10px; margin-top:10px;">
+                    <button class="btn" onclick="go('wizard')">Preview check-in</button>
+                    <button class="btn">Snooze</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="grid dashLower" style="margin-top:14px;">
+          <div class="card">
+            <div class="row">
+              <h2 style="margin:0;">Projects</h2>
+              <span class="badge">Status • Priority • Color tag</span>
+            </div>
+            <div class="stack" style="margin-top:10px;">
+              <div class="projRow">
+                <div class="projLeft">
+                  <div class="pDot" style="background:#7c5cff;"></div>
+                  <div>
+                    <div class="pName">WebApp</div>
+                    <div class="pMeta">Status: Active • Priority: High</div>
+                  </div>
+                </div>
+                <div class="splitMeta">
+                  <div class="badge">5 tasks</div>
+                  <div class="tiny">2 due soon</div>
+                </div>
+              </div>
+              <div class="projRow">
+                <div class="projLeft">
+                  <div class="pDot" style="background:#12b9b0;"></div>
+                  <div>
+                    <div class="pName">Ops</div>
+                    <div class="pMeta">Status: Active • Priority: Medium</div>
+                  </div>
+                </div>
+                <div class="splitMeta">
+                  <div class="badge">3 tasks</div>
+                  <div class="tiny">1 due today</div>
+                </div>
+              </div>
+              <div class="projRow">
+                <div class="projLeft">
+                  <div class="pDot" style="background:#ffcc66;"></div>
+                  <div>
+                    <div class="pName">Personal</div>
+                    <div class="pMeta">Status: On Hold • Priority: Low</div>
+                  </div>
+                </div>
+                <div class="splitMeta">
+                  <div class="badge">7 tasks</div>
+                  <div class="tiny">no deadlines</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>AI Prioritization (Local)</h2>
+            <div class="muted" style="font-size:12px; line-height:1.5;">
+              Uses Ollama on-device. 7B for instant suggestions and quick parsing; 32B for morning briefing and check-in summary.
+            </div>
+            <div class="chips" style="margin-top:10px;">
+              <span class="chip">Mode: Fast (7B)</span>
+              <span class="chip">Mode: Deep (32B)</span>
+              <span class="chip"><span class="miniDot"></span> No external API</span>
+            </div>
+            <div style="margin-top:12px;">
+              <div class="item">
+                <div class="title">Why “Fix login bug” is #1</div>
+                <div class="meta">
+                  <span class="badge">Deadline pressure</span>
+                  <span class="badge">Blocks others</span>
+                  <span class="badge">High impact</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="card">
+            <h2>Quick Actions</h2>
+            <div class="list" style="margin-top:10px;">
+              <div class="item">
+                <div class="title">Add task via natural language</div>
+                <div class="meta"><span class="badge">Example</span> “Add a task to WebApp to fix login bug by Friday”</div>
+                <div style="margin-top:10px;"><button class="btn primary" onclick="go('palette')">Open Cmd+K</button></div>
+              </div>
+              <div class="item">
+                <div class="title">Review overdue</div>
+                <div class="meta"><span class="badge">Sort by due date</span> <span class="badge">Priority score</span></div>
+                <div style="margin-top:10px;"><button class="btn" onclick="go('table')">Open Table</button></div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- SCREEN 2: KANBAN -->
+      <section class="screen" id="kanban">
+        <div class="kanbanHead">
+          <div>
+            <p class="muted" style="margin:0 0 6px 0; font-size:12px;">Project view</p>
+            <h1 class="title">WebApp — Kanban</h1>
+            <div class="chips" style="margin-top:8px;">
+              <span class="chip"><span class="miniDot"></span> Color tag: Purple</span>
+              <span class="chip">Status: Active</span>
+              <span class="chip">Priority: High</span>
+            </div>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <button class="btn" onclick="go('palette')">Add task</button>
+            <button class="btn primary" onclick="go('dashboard')">Back to Dashboard</button>
+          </div>
+        </div>
+
+        <div class="board">
+          <div class="col">
+            <h3>Backlog <span class="count">4</span></h3>
+            <div class="kcard">
+              <div class="t">Refactor settings page</div>
+              <div class="m">
+                <span class="badge">Effort: L</span>
+                <span class="badge">Priority: 34</span>
+                <span class="badge">No due date</span>
+              </div>
+            </div>
+            <div class="kcard">
+              <div class="t">Improve error states</div>
+              <div class="m">
+                <span class="badge">Effort: M</span>
+                <span class="badge">Priority: 40</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="col">
+            <h3>Next <span class="count">3</span></h3>
+            <div class="kcard">
+              <div class="t">Write regression test for auth</div>
+              <div class="m">
+                <span class="badge">Effort: S</span>
+                <span class="badge">Priority: 71</span>
+              </div>
+            </div>
+            <div class="kcard">
+              <div class="t">Triage support tickets</div>
+              <div class="m">
+                <span class="badge">Effort: S</span>
+                <span class="badge">Priority: 62</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="col">
+            <h3>Doing <span class="count">1</span></h3>
+            <div class="kcard">
+              <div class="t">Fix login bug</div>
+              <div class="m">
+                <span class="badge">Due: Fri</span>
+                <span class="badge">Effort: M</span>
+                <span class="badge">Priority: 92</span>
+                <span class="badge"><span class="spark"></span> Parsed</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="col">
+            <h3>Blocked <span class="count">1</span></h3>
+            <div class="kcard">
+              <div class="t">Deploy staging build</div>
+              <div class="m">
+                <span class="badge">Waiting on CI</span>
+                <span class="badge">Priority: 66</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="col">
+            <h3>Done <span class="count">2</span></h3>
+            <div class="kcard">
+              <div class="t">Add log correlation ID</div>
+              <div class="m">
+                <span class="badge">Effort: S</span>
+              </div>
+            </div>
+            <div class="kcard">
+              <div class="t">Update auth docs</div>
+              <div class="m">
+                <span class="badge">Effort: S</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SCREEN 3: TABLE -->
+      <section class="screen" id="table">
+        <div class="tableHead">
+          <div>
+            <div class="muted" style="font-size:12px;margin-bottom:6px;">All tasks (multi-project)</div>
+            <h2>Tasks — Issue Tracker Table</h2>
+          </div>
+          <div style="display:flex; gap:10px; align-items:center;">
+            <button class="btn" onclick="go('palette')">Add with natural language</button>
+            <button class="btn primary" onclick="go('dashboard')">Back</button>
+          </div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width:36%;">Task</th>
+              <th>Project</th>
+              <th>Due</th>
+              <th>Effort</th>
+              <th>Priority</th>
+              <th>Status</th>
+              <th>AI</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>
+                <div style="font-weight:900;">Fix login bug</div>
+                <div class="muted" style="font-size:12px;margin-top:4px;line-height:1.35;">
+                  Break down into steps: reproduce → patch → test → deploy.
+                </div>
+              </td>
+              <td><span class="badge">WebApp</span></td>
+              <td><span class="due warn">Fri</span></td>
+              <td><span class="eff">M</span></td>
+              <td>
+                <div class="prio">
+                  <div class="bar"><span style="width:92%"></span></div>
+                  <div style="font-weight:900;">92</div>
+                </div>
+              </td>
+              <td><span class="badge">Doing</span></td>
+              <td><span class="badge"><span class="spark"></span> Parsed</span></td>
+            </tr>
+
+            <tr>
+              <td>
+                <div style="font-weight:900;">Release notes draft</div>
+                <div class="muted" style="font-size:12px;margin-top:4px;line-height:1.35;">
+                  Pull highlights + known issues + rollout plan.
+                </div>
+              </td>
+              <td><span class="badge">Ops</span></td>
+              <td><span class="due bad">Today</span></td>
+              <td><span class="eff">S</span></td>
+              <td>
+                <div class="prio">
+                  <div class="bar"><span style="width:78%"></span></div>
+                  <div style="font-weight:900;">78</div>
+                </div>
+              </td>
+              <td><span class="badge">Next</span></td>
+              <td><span class="badge">—</span></td>
+            </tr>
+
+            <tr>
+              <td>
+                <div style="font-weight:900;">Deploy staging build</div>
+                <div class="muted" style="font-size:12px;margin-top:4px;line-height:1.35;">
+                  Currently waiting on CI green. Mark blocked.
+                </div>
+              </td>
+              <td><span class="badge">WebApp</span></td>
+              <td><span class="due ok">Mon</span></td>
+              <td><span class="eff">S</span></td>
+              <td>
+                <div class="prio">
+                  <div class="bar"><span style="width:66%"></span></div>
+                  <div style="font-weight:900;">66</div>
+                </div>
+              </td>
+              <td><span class="badge">Blocked</span></td>
+              <td><span class="badge">—</span></td>
+            </tr>
+
+            <tr>
+              <td>
+                <div style="font-weight:900;">Decide gym plan for tomorrow</div>
+                <div class="muted" style="font-size:12px;margin-top:4px;line-height:1.35;">
+                  Quick decision task; reduces “mental open loop”.
+                </div>
+              </td>
+              <td><span class="badge">Personal</span></td>
+              <td><span class="due ok">Tomorrow</span></td>
+              <td><span class="eff">S</span></td>
+              <td>
+                <div class="prio">
+                  <div class="bar"><span style="width:55%"></span></div>
+                  <div style="font-weight:900;">55</div>
+                </div>
+              </td>
+              <td><span class="badge">Backlog</span></td>
+              <td><span class="badge">—</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <!-- SCREEN 4: WIZARD -->
+      <section class="screen" id="wizard">
+        <div class="wizard">
+          <div class="stepper">
+            <div class="stepTop">
+              <div>
+                <h2>Evening Check-in — 9:00 PM</h2>
+                <div class="muted" style="font-size:12px;margin-top:4px;">
+                  Guided 5-minute flow • Summary + auto-schedule tomorrow • Model: 32B
+                </div>
+              </div>
+              <div class="progress">Step 4 / 5</div>
+            </div>
+
+            <p class="q">Energy level today (1–5)?</p>
+            <div class="field">
+              Choose a number. This helps the assistant avoid over-scheduling tomorrow when today was heavy.
+              (In your real app this is one-tap.)
+              <div class="energy">
+                <div class="e">1</div>
+                <div class="e">2</div>
+                <div class="e active">3</div>
+                <div class="e">4</div>
+                <div class="e">5</div>
+              </div>
+            </div>
+
+            <div class="wizBtns">
+              <button class="btn">Back</button>
+              <button class="btn primary">Next</button>
+              <button class="btn" style="margin-left:auto;">Skip</button>
+            </div>
+
+            <div style="margin-top:14px;" class="chips">
+              <span class="chip">Q1 Completed</span>
+              <span class="chip">Q2 Blocked</span>
+              <span class="chip">Q3 New tasks</span>
+              <span class="chip">Q4 Energy</span>
+              <span class="chip">Q5 Tomorrow must-happen</span>
+            </div>
+
+            <div style="margin-top:14px;" class="item">
+              <div class="title">Auto-scheduling preview (tomorrow)</div>
+              <div class="meta">
+                <span class="badge">Blocked tasks bubble up</span>
+                <span class="badge">Deadlines respected</span>
+                <span class="badge">Energy-aware</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="side">
+            <div class="card aiPanel">
+              <h3>Assistant output (preview)</h3>
+              <div class="callout">
+                <div class="big">Summary draft</div>
+                <div class="small">
+                  “Today you shipped progress on auth, but CI blocked staging. You completed the ops draft and
+                  added one new task. Energy was moderate (3/5), so tomorrow should stay focused.”
+                </div>
+              </div>
+              <div class="callout" style="margin-top:10px;">
+                <div class="big">Scheduled for tomorrow</div>
+                <div class="small">
+                  1) Fix login bug (finish + test) • 2) Deploy staging build (retry once CI green) •
+                  3) One small personal decision task.
+                </div>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2 style="margin:0 0 10px 0;">Why this screen works</h2>
+              <div class="muted" style="font-size:12px; line-height:1.5;">
+                The wizard keeps you in a tight loop (one question per step), then shows the “tomorrow plan”
+                so you can approve it instead of trusting a black box.
+              </div>
+              <div style="display:flex; gap:10px; margin-top:12px;">
+                <button class="btn" onclick="go('dashboard')">Back</button>
+                <button class="btn primary">Finish check-in</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- SCREEN 5: COMMAND PALETTE -->
+      <section class="screen" id="palette">
+        <div class="paletteDemo">
+          <div class="mockApp">
+            <div class="mockHeader">
+              <div class="left">
+                <div class="logo" style="width:26px;height:26px;border-radius:9px;"></div>
+                Dashboard
+              </div>
+              <div class="search">
+                <span class="muted">Command palette</span>
+                <span class="kbd">Ctrl/Cmd + K</span>
+              </div>
+            </div>
+            <div class="mockBody">
+              <div class="card">
+                <h2 style="margin:0 0 8px 0;">Today</h2>
+                <div class="muted" style="font-size:12px;">
+                  You can keep the app minimal and do most work through commands.
+                </div>
+              </div>
+            </div>
+
+            <div class="overlay">
+              <div class="palette">
+                <div class="paletteTop">
+                  <div class="input">add a task to Project WebApp to fix the login bug by Friday</div>
+                  <button class="btn primary">Enter</button>
+                </div>
+
+                <div class="paletteList">
+                  <div class="opt">
+                    <div class="main">
+                      <div class="icon">+</div>
+                      <div>
+                        <p class="t">Create task: “Fix login bug”</p>
+                        <div class="s">Parsed fields: Project = WebApp, Due = Friday, Effort = M (suggested), Priority score = 92 (suggested)</div>
+                      </div>
+                    </div>
+                    <div class="rightChips">
+                      <span class="badge">Project: WebApp</span>
+                      <span class="badge">Due: Fri</span>
+                      <span class="badge">Effort: M</span>
+                      <span class="badge">Priority: 92</span>
+                      <span class="badge"><span class="spark"></span> DeepSeek parse</span>
+                    </div>
+                  </div>
+
+                  <div class="opt">
+                    <div class="main">
+                      <div class="icon" style="background: rgba(61,214,208,.16); border-color: rgba(61,214,208,.35);">!</div>
+                      <div>
+                        <p class="t">Alternative: create + schedule for tomorrow</p>
+                        <div class="s">If it’s too late today, place it in “Next” and timebox 90 minutes tomorrow morning.</div>
+                      </div>
+                    </div>
+                    <div class="rightChips">
+                      <span class="badge">Status: Next</span>
+                      <span class="badge">Timebox</span>
+                    </div>
+                  </div>
+
+                  <div class="opt">
+                    <div class="main">
+                      <div class="icon" style="background: rgba(255,204,102,.16); border-color: rgba(255,204,102,.35);">↻</div>
+                      <div>
+                        <p class="t">Run prioritization now (local 7B)</p>
+                        <div class="s">Recalculate today’s top 3 based on deadlines, blocks, and effort.</div>
+                      </div>
+                    </div>
+                    <div class="rightChips">
+                      <span class="badge">Model: 7B</span>
+                      <span class="badge">Instant</span>
+                    </div>
+                  </div>
+
+                  <div class="muted" style="font-size:12px; padding: 4px 2px;">
+                    Tip: show “structured preview” before saving so it feels safe and not magical.
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="stack">
+            <div class="card">
+              <h2 style="margin:0 0 8px 0;">What you’re “seeing” here</h2>
+              <div class="muted" style="font-size:12px;line-height:1.55;">
+                This sample shows the command palette as a real UI surface: you type natural language,
+                the assistant parses it, and you get a structured preview (project, due date, effort, priority).
+              </div>
+              <div class="chips" style="margin-top:10px;">
+                <span class="chip">Fast parse: 7B</span>
+                <span class="chip">Briefing/reflection: 32B</span>
+                <span class="chip"><span class="miniDot"></span> Local-only</span>
+              </div>
+            </div>
+
+            <div class="card">
+              <h2 style="margin:0 0 8px 0;">Try the other screens</h2>
+              <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                <button class="btn" onclick="go('dashboard')">Dashboard</button>
+                <button class="btn" onclick="go('kanban')">Kanban</button>
+                <button class="btn" onclick="go('table')">Table</button>
+                <button class="btn" onclick="go('wizard')">Check-in</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+
+  <script>
+    // Theme handling (including midnight, which just uses :root defaults)
+    const themeBtns = document.querySelectorAll('.themeBtn');
+    themeBtns.forEach(btn => {
+      btn.addEventListener('click', () => {
+        themeBtns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+
+        const theme = btn.dataset.theme;
+        document.body.setAttribute('data-theme', theme);
+
+        // midnight uses default :root tokens; set attribute anyway for consistency
+        if (theme === 'midnight') document.body.setAttribute('data-theme', 'midnight');
+      });
+    });
+
+    // View switching
+    const viewBtns = document.querySelectorAll('.viewBtn');
+    const screens = document.querySelectorAll('.screen');
+
+    function setView(id){
+      viewBtns.forEach(b => b.classList.toggle('active', b.dataset.view === id));
+      screens.forEach(s => s.classList.toggle('active', s.id === id));
+      window.scrollTo({top: 0, behavior: 'smooth'});
+    }
+    function go(id){ setView(id); }
+    window.go = go;
+
+    viewBtns.forEach(btn => btn.addEventListener('click', () => setView(btn.dataset.view)));
+  </script>
+</body>
+</html>
