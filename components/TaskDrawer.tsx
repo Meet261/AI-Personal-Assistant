@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import type { Task, Project, TaskComment } from '@/lib/types'
 import { supabase } from '@/lib/supabase'
 import { format, parseISO } from 'date-fns'
@@ -40,7 +40,7 @@ interface Props {
 }
 
 export default function TaskDrawer({ task, projects, onClose, onUpdated, onDeleted }: Props) {
-  const [form, setForm] = useState({
+  const initialForm = useMemo(() => ({
     title:        task.title,
     description:  task.description || '',
     priority:     task.priority,
@@ -49,7 +49,12 @@ export default function TaskDrawer({ task, projects, onClose, onUpdated, onDelet
     deadline:     task.deadline || '',
     scheduled_for: task.scheduled_for || '',
     project_id:   task.project_id || '',
-  })
+  }), [task.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const [form, setForm] = useState(initialForm)
+
+  // Re-initialize form when task changes
+  useEffect(() => { setForm(initialForm) }, [initialForm])
   const [saving, setSaving] = useState(false)
   const [saved, setSaved]   = useState(false)
   const [comments, setComments] = useState<TaskComment[]>([])
@@ -89,8 +94,9 @@ export default function TaskDrawer({ task, projects, onClose, onUpdated, onDelet
       updated_at: new Date().toISOString(),
     }).eq('id', task.id)
     setSaving(false)
-    onClose()
+    setSaved(true)
     onUpdated()
+    setTimeout(() => { setSaved(false); onClose() }, 800)
   }
 
   async function aiSchedule() {

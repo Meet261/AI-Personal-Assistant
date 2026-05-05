@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 import type { Task, Project } from '@/lib/types'
@@ -25,6 +25,13 @@ const STATUS_SECTIONS = [
   { key: 'deferred',   label: 'Blocked',       icon: AlertCircle, color: '#ffcc66' },
   { key: 'done',       label: 'Completed',     icon: CheckCircle2, color: '#27d98a' },
 ]
+
+const statusStyle: Record<string, { bg: string; text: string }> = {
+  active:    { bg: 'rgba(39,217,138,.12)',  text: '#27d98a' },
+  on_hold:   { bg: 'rgba(255,204,102,.12)', text: '#ffcc66' },
+  completed: { bg: 'rgba(61,214,208,.12)',  text: '#3dd6d0' },
+  archived:  { bg: 'rgba(166,179,214,.12)', text: '#a6b3d6' },
+}
 
 const inp: React.CSSProperties = {
   background: 'var(--faint)', border: '1px solid var(--border)', color: 'var(--text)',
@@ -179,7 +186,7 @@ export default function ProjectDetailPage() {
               <div>
                 <h1 style={{ fontFamily: 'Raleway, sans-serif', fontWeight: 900, fontSize: 22, color: 'var(--text)', margin: 0 }}>{project.name}</h1>
                 <div style={{ display: 'flex', gap: 8, marginTop: 6, flexWrap: 'wrap' }}>
-                  <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, fontFamily: 'Raleway, sans-serif', background: 'rgba(39,217,138,.12)', color: '#27d98a' }}>
+                  <span style={{ padding: '3px 10px', borderRadius: 999, fontSize: 11, fontWeight: 700, fontFamily: 'Raleway, sans-serif', background: (statusStyle[project.status] || statusStyle.archived).bg, color: (statusStyle[project.status] || statusStyle.archived).text }}>
                     {project.status.replace('_', ' ')}
                   </span>
                   <span style={{ fontSize: 12, color: 'var(--muted)' }}>

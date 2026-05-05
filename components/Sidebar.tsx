@@ -34,13 +34,18 @@ export default function Sidebar() {
   const [ollamaOk, setOllamaOk] = useState(false)
 
   useEffect(() => {
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 2000)
-    fetch('http://localhost:11434/api/tags', { signal: controller.signal })
-      .then(r => setOllamaOk(r.ok))
-      .catch(() => setOllamaOk(false))
-      .finally(() => clearTimeout(timeout))
-    return () => { controller.abort(); clearTimeout(timeout) }
+    let cancelled = false
+    function check() {
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 2000)
+      fetch('http://localhost:11434/api/tags', { signal: controller.signal })
+        .then(r => { if (!cancelled) setOllamaOk(r.ok) })
+        .catch(() => { if (!cancelled) setOllamaOk(false) })
+        .finally(() => clearTimeout(timeout))
+    }
+    check()
+    const interval = setInterval(check, 30_000)
+    return () => { cancelled = true; clearInterval(interval) }
   }, [])
 
   return (

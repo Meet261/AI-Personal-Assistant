@@ -1,5 +1,5 @@
 'use client'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { CheckCircle2, Zap, ArrowRight, ArrowLeft, Loader2 } from 'lucide-react'
 import { format } from 'date-fns'
 
@@ -40,17 +40,33 @@ function clearDraft() {
 }
 
 export default function CheckinPage() {
-  const draft = typeof window !== 'undefined' ? loadDraft() : null
-
-  const [step, setStep]       = useState<number>(draft?.step ?? 0)
+  const [step, setStep]       = useState<number>(0)
   const [answers, setAnswers] = useState<Record<string, string | number>>(
-    draft?.answers ?? { completed_today: '', blocked_or_pushed: '', new_tasks: '', energy_level: 3, tomorrow_focus: '' }
+    { completed_today: '', blocked_or_pushed: '', new_tasks: '', energy_level: 3, tomorrow_focus: '' }
   )
+  const [draft, setDraft] = useState<ReturnType<typeof loadDraft>>(null)
+  const hydrated = useRef(false)
+
+  // Load draft after hydration to avoid SSR mismatch
+  useEffect(() => {
+    if (hydrated.current) return
+    hydrated.current = true
+    const d = loadDraft()
+    if (d) {
+      setDraft(d)
+      setStep(d.step ?? 0)
+      setAnswers(d.answers ?? { completed_today: '', blocked_or_pushed: '', new_tasks: '', energy_level: 3, tomorrow_focus: '' })
+    }
+  }, [])
   const [submitting, setSubmitting] = useState(false)
   const [result, setResult] = useState<{ summary: string; tasksScheduled: Array<{ title: string; priority: string }> } | null>(null)
 
   // Persist to sessionStorage whenever step or answers change
-  useEffect(() => { saveDraft(step, answers) }, [step, answers])
+  useEffect(() => {
+    if (!hydrated.current) return
+    saveDraft(step, answers)
+    setDraft({ step, answers })
+  }, [step, answers])
 
   const q = QUESTIONS[step]
   const isLast  = step === QUESTIONS.length - 1
@@ -126,7 +142,7 @@ export default function CheckinPage() {
             )}
           </div>
           {draft && (
-            <button onClick={() => { clearDraft(); setStep(0); setAnswers({ completed_today: '', blocked_or_pushed: '', new_tasks: '', energy_level: 3, tomorrow_focus: '' }) }}
+            <button onClick={() => { clearDraft(); setDraft(null); setStep(0); setAnswers({ completed_today: '', blocked_or_pushed: '', new_tasks: '', energy_level: 3, tomorrow_focus: '' }) }}
               style={{ fontSize: 11, color: 'var(--muted)', background: 'none', border: '1px solid var(--border)', borderRadius: 8, padding: '4px 10px', cursor: 'pointer', ...S, fontWeight: 700 }}>
               Start fresh
             </button>

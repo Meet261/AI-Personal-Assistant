@@ -3,14 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
-    "dev:all": "concurrently \"next dev\" \"node scripts/cron.mjs\"",
+    "dev": "next dev --webpack",
+    "dev:all": "concurrently \"next dev --webpack\" \"node scripts/cron.mjs\"",
     "build": "next build",
     "start": "next start",
     "cron": "node scripts/cron.mjs",
     "lint": "eslint"
   },
   "dependencies": {
+    "@next/swc-darwin-arm64": "^16.2.4",
     "@supabase/supabase-js": "^2.105.1",
     "date-fns": "^4.1.0",
     "lucide-react": "^1.14.0",
