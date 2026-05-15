@@ -267,35 +267,44 @@ export default function AgentPage() {
           {showAgentMenu && (
             <div style={{
               position: 'absolute', top: '110%', left: 0, zIndex: 100,
-              background: 'var(--card)', border: '1px solid var(--border)',
-              borderRadius: 12, padding: 6, minWidth: 240,
-              boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
-              display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2,
+              background: 'var(--panel)', border: '1px solid var(--border)',
+              borderRadius: 14, padding: 8, minWidth: 256,
+              boxShadow: '0 12px 40px rgba(0,0,0,0.22)',
             }}>
-              {AGENTS.map(agent => {
-                const Icon = AGENT_ICONS[agent.id]
-                const active = agent.id === activeAgentId
-                return (
-                  <button key={agent.id} onClick={() => { switchAgent(agent.id); setShowAgentMenu(false) }}
-                    style={{
-                      display: 'flex', alignItems: 'center', gap: 7, padding: '8px 10px',
-                      borderRadius: 8, border: 'none', cursor: 'pointer', textAlign: 'left',
-                      background: active ? `${agent.color}18` : 'transparent',
-                      color: active ? agent.color : 'var(--text)',
-                      fontFamily: 'Raleway, sans-serif', fontWeight: active ? 800 : 600, fontSize: 12,
-                      transition: 'background .1s',
-                    }}
-                    onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--faint)' }}
-                    onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
-                  >
-                    <div style={{ width: 22, height: 22, borderRadius: 6, background: `${agent.color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                      <Icon size={12} style={{ color: agent.color }} />
-                    </div>
-                    <span style={{ flex: 1 }}>{agent.shortLabel}</span>
-                    {active && <div style={{ width: 6, height: 6, borderRadius: '50%', background: agent.color, flexShrink: 0 }} />}
-                  </button>
-                )
-              })}
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+                {AGENTS.map(agent => {
+                  const Icon = AGENT_ICONS[agent.id]
+                  const active = agent.id === activeAgentId
+                  return (
+                    <button key={agent.id} onClick={() => { switchAgent(agent.id); setShowAgentMenu(false) }}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8, padding: '9px 10px',
+                        borderRadius: 9, border: 'none', cursor: 'pointer', textAlign: 'left',
+                        background: active ? `${agent.color}20` : 'transparent',
+                        transition: 'background .1s',
+                      }}
+                      onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--faint)' }}
+                      onMouseLeave={e => { if (!active) e.currentTarget.style.background = active ? `${agent.color}20` : 'transparent' }}
+                    >
+                      <div style={{
+                        width: 24, height: 24, borderRadius: 7, flexShrink: 0,
+                        background: active ? `${agent.color}30` : 'var(--faint)',
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        border: active ? `1.5px solid ${agent.color}60` : '1.5px solid transparent',
+                      }}>
+                        <Icon size={13} style={{ color: active ? agent.color : 'var(--muted)' }} />
+                      </div>
+                      <span style={{
+                        fontFamily: 'Raleway, sans-serif', fontWeight: active ? 800 : 600,
+                        fontSize: 12, color: active ? agent.color : 'var(--text)', flex: 1,
+                      }}>
+                        {agent.shortLabel}
+                      </span>
+                      {active && <div style={{ width: 5, height: 5, borderRadius: '50%', background: agent.color, flexShrink: 0 }} />}
+                    </button>
+                  )
+                })}
+              </div>
             </div>
           )}
         </div>
