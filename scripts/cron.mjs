@@ -38,11 +38,12 @@ function scheduleDaily(hour, minute, label, fn) {
 
   function tick() {
     const now  = new Date()
-    const date = now.toISOString().slice(0, 10)
+    // Use local date (not UTC) so the date matches the local clock hour
+    const date = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
     const h    = now.getHours()
     const m    = now.getMinutes()
 
-    // Reset fired flag at midnight
+    // Reset fired flag at local midnight
     if (date !== lastDate) { firedToday = false; lastDate = date }
 
     if (h === hour && m === minute && !firedToday) {
@@ -225,10 +226,10 @@ async function runHabitDigest(date) {
 console.log('[cron] Scheduler started')
 console.log('[cron]   Morning briefing:        08:00 daily')
 console.log('[cron]   Evening summary:         21:00 daily')
-console.log('[cron]   Nightly scheduler cron:  22:00 daily')
+console.log('[cron]   Nightly scheduler cron:  21:00 daily')
 console.log('[cron]   Weekly habit digest:     20:00 Sunday')
 
 scheduleDaily(8,  0, 'Morning Briefing',      date => runBriefing('morning', date))
 scheduleDaily(21, 0, 'Evening Summary',        date => runBriefing('evening', date))
-scheduleDaily(22, 0, 'Nightly Scheduler Cron', date => runNightlyScheduler(date))
+scheduleDaily(21, 0, 'Nightly Scheduler Cron', date => runNightlyScheduler(date))
 scheduleDaily(20, 0, 'Weekly Habit Digest',    date => runHabitDigest(date))

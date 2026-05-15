@@ -240,7 +240,7 @@ export async function executeKnowledgeAction(action: string, params: Record<stri
 
       const [{ data: paper }, { data: highlights }] = await Promise.all([
         supabase.from('research_papers').select('id,title,authors,year').eq('id', paperId).single(),
-        supabase.from('paper_highlights').select('text,page').eq('paper_id', paperId),
+        supabase.from('research_highlights').select('selected_text,page_number').eq('paper_id', paperId),
       ])
 
       if (!paper) return { ok: false, message: 'Paper not found' }
@@ -250,8 +250,8 @@ export async function executeKnowledgeAction(action: string, params: Record<stri
       let indexed = 0
 
       for (const hl of highlights) {
-        const id = `hl_${paper.id}_${hl.page ?? indexed}`
-        const docText = `Highlight from "${paper.title}" (${paper.authors ?? ''}, ${paper.year ?? ''}):\n${hl.text}`
+        const id = `hl_${paper.id}_${hl.page_number ?? indexed}`
+        const docText = `Highlight from "${paper.title}" (${paper.authors ?? ''}, ${paper.year ?? ''}):\n${hl.selected_text}`
         const embedding = await embed(docText)
         await chromaUpsert(
           colId,

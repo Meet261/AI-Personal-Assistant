@@ -15,6 +15,7 @@ import { executeHabitAction } from '@/agents/specialist/habit-tracker'
 import { executeKnowledgeAction } from '@/agents/specialist/knowledge'
 import { executeMemoryAction } from '@/agents/specialist/memory'
 import { executeEmailAction } from '@/agents/specialist/email'
+import { executeDigesterAction } from '@/agents/specialist/paper-digester'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -31,10 +32,11 @@ async function dispatchTool(agentId: AgentId, action: string, params: Record<str
     case 'trading':        return executeTradingAction(action, params)
     case 'journal':        return executeJournalAction(action, params)
     case 'scheduler':      return executeSchedulerAction(action, params)
-    case 'habit-tracker':  return executeHabitAction(action, params)
-    case 'knowledge':      return executeKnowledgeAction(action, params)
-    case 'memory':         return executeMemoryAction(action, params)
-    case 'email':          return executeEmailAction(action, params)
+    case 'habit-tracker':   return executeHabitAction(action, params)
+    case 'knowledge':       return executeKnowledgeAction(action, params)
+    case 'memory':          return executeMemoryAction(action, params)
+    case 'email':           return executeEmailAction(action, params)
+    case 'paper-digester':  return executeDigesterAction(action, params)
     default:               return { ok: false, message: `No executor for ${agentId}` }
   }
 }
@@ -156,7 +158,10 @@ async function runAgent(
 }
 
 export async function POST(req: NextRequest) {
-  const { messages, sessionId, model = 'deepseek-r1:7b', agentId: forcedAgent } = await req.json()
+  const body = await req.json()
+  const { messages, model = 'deepseek-r1:7b', agentId: forcedAgent } = body
+  // Accept both session_id (what client sends) and sessionId (legacy)
+  const sessionId: string | undefined = body.sessionId ?? body.session_id
   const userMessage = messages[messages.length - 1]?.content ?? ''
 
   // 1. Build shared context once (cheap DB reads + file reads)
@@ -180,14 +185,22 @@ export async function POST(req: NextRequest) {
 
   const allToolResults = responses.flatMap(r => r.toolResults)
 
-  // 5. Persist to Supabase
+  // 5. Persist to Supabase (fire-and-forget)
+  // Log routing decision for debugging + routing improvement
+  void supabase.from('agent_intent_log').insert({
+    user_message: userMessage.slice(0, 500),
+    primary_agent: intent.primaryAgent,
+    secondary_agents: intent.secondaryAgents,
+    confidence: intent.confidence,
+    reason: intent.reason,
+    session_id: sessionId ?? null,
+  })
+
   if (sessionId) {
     const lastUser = messages[messages.length - 1]
-    Promise.all([
-      supabase.from('agent_messages').insert({ session_id: sessionId, role: lastUser.role, content: lastUser.content }),
-      supabase.from('agent_messages').insert({ session_id: sessionId, role: 'assistant', content: finalReply, tool_results: allToolResults.length ? allToolResults : null }),
-      supabase.from('agent_sessions').update({ last_message_at: new Date().toISOString(), agent_id: intent.primaryAgent }).eq('id', sessionId),
-    ]).then(() => {})
+    void supabase.from('agent_messages').insert({ session_id: sessionId, role: lastUser.role, content: lastUser.content })
+    void supabase.from('agent_messages').insert({ session_id: sessionId, role: 'assistant', content: finalReply, tool_results: allToolResults.length ? allToolResults : null })
+    void supabase.from('agent_sessions').update({ last_message_at: new Date().toISOString(), agent_id: intent.primaryAgent }).eq('id', sessionId)
   }
 
   // 6. Auto-extract memories every 4 user messages (fire-and-forget)

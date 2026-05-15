@@ -3,7 +3,7 @@ import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_SERVICE_KEY!
+  process.env.SUPABASE_SERVICE_KEY!
 )
 
 // Fetch all conversation sessions (metadata only for list, messages for a specific session)
