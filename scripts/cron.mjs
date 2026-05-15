@@ -191,10 +191,44 @@ async function runBriefing(type, date) {
   console.log(`[cron] ✓ ${type} briefing complete`)
 }
 
+// ── Nightly scheduler cron (22:00) ──────────────────────────────────────────
+async function runNightlyScheduler(date) {
+  console.log(`[cron] Running nightly scheduler for ${date}…`)
+  const res = await fetch(`${APP_URL}/api/agents/scheduler`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ cron: true }),
+  })
+  const data = await res.json()
+  if (data.ok) {
+    console.log(`[cron] ✓ Nightly scheduler complete — pushed: ${(data.pushed ?? []).join(', ') || 'none'}`)
+  } else {
+    console.error(`[cron] Nightly scheduler error: ${data.message}`)
+  }
+}
+
+// ── Habit weekly digest (Sunday 20:00) ───────────────────────────────────────
+async function runHabitDigest(date) {
+  const day = new Date().getDay() // 0 = Sunday
+  if (day !== 0) return           // only fire on Sundays
+  console.log(`[cron] Running weekly habit digest for ${date}…`)
+  const res = await fetch(`${APP_URL}/api/agents/habit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'send_weekly_digest', params: { date } }),
+  })
+  const data = await res.json()
+  console.log(`[cron] Habit digest: ${data.message}`)
+}
+
 // ── Start ────────────────────────────────────────────────────────────────────
 console.log('[cron] Scheduler started')
-console.log('[cron]   Morning briefing: 08:00')
-console.log('[cron]   Evening summary:  21:00')
+console.log('[cron]   Morning briefing:        08:00 daily')
+console.log('[cron]   Evening summary:         21:00 daily')
+console.log('[cron]   Nightly scheduler cron:  22:00 daily')
+console.log('[cron]   Weekly habit digest:     20:00 Sunday')
 
-scheduleDaily(8,  0, 'Morning Briefing', date => runBriefing('morning', date))
-scheduleDaily(21, 0, 'Evening Summary',  date => runBriefing('evening', date))
+scheduleDaily(8,  0, 'Morning Briefing',      date => runBriefing('morning', date))
+scheduleDaily(21, 0, 'Evening Summary',        date => runBriefing('evening', date))
+scheduleDaily(22, 0, 'Nightly Scheduler Cron', date => runNightlyScheduler(date))
+scheduleDaily(20, 0, 'Weekly Habit Digest',    date => runHabitDigest(date))

@@ -47,12 +47,11 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(data || [])
   }
 
-  // Default: list all sessions
-  const { data } = await supabase
-    .from('agent_sessions')
-    .select('*')
-    .order('started_at', { ascending: false })
-    .limit(50)
+  // Default: list sessions, optionally filtered by agent_id
+  const agentId = searchParams.get('agent_id')
+  let q = supabase.from('agent_sessions').select('*').order('started_at', { ascending: false }).limit(50)
+  if (agentId) q = q.eq('agent_id', agentId)
+  const { data } = await q
   return NextResponse.json(data || [])
 }
 
@@ -62,9 +61,10 @@ export async function POST(req: NextRequest) {
   const { action } = body
 
   if (action === 'create_session') {
+    const { agent_id = 'assistant' } = body
     const { data, error } = await supabase
       .from('agent_sessions')
-      .insert({ started_at: new Date().toISOString(), message_count: 0 })
+      .insert({ started_at: new Date().toISOString(), message_count: 0, agent_id })
       .select()
       .single()
     if (error) return NextResponse.json({ error: error.message }, { status: 500 })

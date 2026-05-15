@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { format } from 'date-fns'
+import { readFileSync, existsSync } from 'fs'
+import { join } from 'path'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -99,15 +101,39 @@ export async function POST(req: NextRequest) {
   const { type, date } = await req.json()
   const targetDate = date || format(new Date(), 'yyyy-MM-dd')
 
-  const [tasksRes, projectsRes, journalRes] = await Promise.all([
+  const [tasksRes, projectsRes, journalRes, researchRes] = await Promise.all([
     supabase.from('tasks').select('title,priority,effort,deadline,scheduled_for,project:projects(name)').neq('status', 'done').order('priority'),
     supabase.from('projects').select('name').eq('status', 'active'),
     supabase.from('journal_entries').select('*').eq('date', targetDate).single(),
+    supabase.from('research_papers').select('title,reading_status').eq('reading_status', 'reading').limit(5),
   ])
 
   const tasks = tasksRes.data || []
   const projects = projectsRes.data || []
   const journal = journalRes.data
+  const readingNow = researchRes.data || []
+
+  // Trading context from CSV + risk state
+  let tradingContext = ''
+  try {
+    const tradingBase = join(process.cwd(), '..', 'Trading Agent', 'trading_agent', 'logs')
+    if (existsSync(join(tradingBase, 'trades.csv'))) {
+      const lines = readFileSync(join(tradingBase, 'trades.csv'), 'utf-8').trim().split('\n')
+      const today = targetDate.replace(/-/g, '.')
+      const todayTrades = lines.slice(1).filter(l => l.includes(today))
+      const profits = todayTrades.map(l => parseFloat(l.split(',')[11])).filter(p => !isNaN(p))
+      const totalPnl = profits.reduce((a, b) => a + b, 0)
+      const wins = profits.filter(p => p > 0).length
+      if (profits.length > 0) {
+        tradingContext = `\nTrading (${type === 'morning' ? 'yesterday' : 'today'}): ${profits.length} trades, ${wins}W/${profits.length - wins}L, P&L: $${totalPnl.toFixed(2)}`
+      }
+    }
+    if (existsSync(join(tradingBase, 'risk_state.json'))) {
+      const state = JSON.parse(readFileSync(join(tradingBase, 'risk_state.json'), 'utf-8'))
+      const openSyms = Object.entries(state.open_positions || {}).filter(([, v]) => v).map(([k]) => k)
+      if (openSyms.length > 0) tradingContext += ` | Open positions: ${openSyms.join(', ')}`
+    }
+  } catch {}
 
   const overdue = tasks.filter((t: { deadline?: string }) => t.deadline && t.deadline < targetDate)
   const urgent = tasks.filter((t: { priority: string }) => t.priority === 'urgent')
@@ -116,7 +142,7 @@ export async function POST(req: NextRequest) {
   let prompt = ''
 
   if (type === 'morning') {
-    prompt = `You are a personal productivity assistant. Generate a focused morning briefing.
+    prompt = `You are a personal productivity assistant. Generate a focused morning briefing that covers ALL active areas of the user's work.
 
 Today: ${targetDate}
 Active projects: ${projects.map((p: { name: string }) => p.name).join(', ')}
@@ -129,11 +155,13 @@ ${urgent.map((t: { title: string; deadline?: string }) => `- ${t.title} (deadlin
 
 Overdue (${overdue.length}):
 ${overdue.map((t: { title: string; deadline?: string }) => `- ${t.title} (was due: ${t.deadline})`).join('\n') || 'None'}
+${tradingContext ? `\nTrading Agent: ${tradingContext}` : ''}
+${readingNow.length > 0 ? `\nCurrently reading: ${readingNow.map((p: { title: string }) => p.title).join(', ')}` : ''}
 
-Write a brief, motivating morning briefing in 2-3 paragraphs. Then list exactly 3 top priorities for today:
+Write a brief, motivating morning briefing in 2-3 paragraphs covering tasks, research, and trading. Then list exactly 3 top priorities for today:
 PRIORITIES_JSON: ["priority 1", "priority 2", "priority 3"]`
   } else {
-    prompt = `You are a personal productivity assistant. Generate a concise evening summary.
+    prompt = `You are a personal productivity assistant. Generate a concise evening summary covering all active areas.
 
 Today: ${targetDate}
 ${journal ? `Evening check-in:
@@ -143,8 +171,10 @@ ${journal ? `Evening check-in:
 - Tomorrow focus: ${journal.tomorrow_focus}` : 'No check-in completed yet.'}
 
 Open tasks: ${tasks.length} remaining. Urgent: ${urgent.map((t: { title: string }) => t.title).join(', ') || 'none'}
+${tradingContext ? `Trading today: ${tradingContext}` : ''}
+${readingNow.length > 0 ? `Research in progress: ${readingNow.map((p: { title: string }) => p.title).join(', ')}` : ''}
 
-Write a brief encouraging evening summary (2 paragraphs). Then list 3 top priorities for tomorrow:
+Write a brief encouraging evening summary (2 paragraphs) covering tasks, research progress, and trading. Then list 3 top priorities for tomorrow:
 PRIORITIES_JSON: ["priority 1", "priority 2", "priority 3"]`
   }
 
