@@ -1,10 +1,11 @@
 import { createClient } from '@supabase/supabase-js'
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!
-
-// Client-side: anon key only (safe to expose — RLS controls access)
-// Server-side API routes use SUPABASE_SERVICE_KEY directly (never NEXT_PUBLIC_)
+// This is a localhost-only personal app with no external users.
+// RLS is enabled on the Supabase project so the anon key returns empty results.
+// We use the service key so client pages can read/write directly.
+// The key is exposed in the client bundle — acceptable for a local-only app.
+// If you ever deploy this publicly, replace direct Supabase calls with API routes.
 export const supabase = createClient(
-  supabaseUrl,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_SERVICE_KEY!
 )

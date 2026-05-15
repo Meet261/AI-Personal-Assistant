@@ -80,6 +80,7 @@ export default function AgentPage() {
   const [model, setModel] = useState('deepseek-r1:7b')
   const [streaming, setStreaming] = useState(false)
   const [showModelMenu, setShowModelMenu] = useState(false)
+  const [showAgentMenu, setShowAgentMenu] = useState(false)
 
   const [sessions, setSessions] = useState<AgentSession[]>([])
   const [activity, setActivity] = useState<ActivityItem[]>([])
@@ -241,29 +242,63 @@ export default function AgentPage() {
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--bg)' }}>
 
       {/* ── Agent switcher bar ── */}
-      <div style={{ flexShrink: 0, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 6, background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}>
-        {AGENTS.map(agent => {
-          const Icon = AGENT_ICONS[agent.id]
-          const active = agent.id === activeAgentId
-          return (
-            <button
-              key={agent.id}
-              onClick={() => switchAgent(agent.id)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 7,
-                padding: '7px 14px', borderRadius: 10, border: 'none', cursor: 'pointer',
-                fontFamily: 'Raleway, sans-serif', fontWeight: 700, fontSize: 12,
-                background: active ? `${agent.color}18` : 'transparent',
-                color: active ? agent.color : 'var(--muted)',
-                outline: active ? `1.5px solid ${agent.color}40` : '1.5px solid transparent',
-                transition: 'all .15s',
-              }}
-            >
-              <Icon size={14} />
-              {agent.shortLabel}
-            </button>
-          )
-        })}
+      <div style={{ flexShrink: 0, padding: '10px 16px', display: 'flex', alignItems: 'center', gap: 10, background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}>
+
+        {/* Agent dropdown */}
+        <div style={{ position: 'relative' }}>
+          <button
+            onClick={() => setShowAgentMenu(o => !o)}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px',
+              borderRadius: 10, border: '1px solid var(--border)', background: `${activeAgent.color}12`,
+              cursor: 'pointer', fontFamily: 'Raleway, sans-serif', fontWeight: 700, fontSize: 13,
+              color: activeAgent.color, minWidth: 160,
+            }}
+          >
+            <AgentIcon size={15} />
+            {activeAgent.shortLabel}
+            <ChevronDown size={12} style={{ marginLeft: 'auto', opacity: 0.6 }} />
+          </button>
+          {showAgentMenu && (
+            <div onClick={() => setShowAgentMenu(false)} style={{
+              position: 'fixed', inset: 0, zIndex: 99,
+            }} />
+          )}
+          {showAgentMenu && (
+            <div style={{
+              position: 'absolute', top: '110%', left: 0, zIndex: 100,
+              background: 'var(--card)', border: '1px solid var(--border)',
+              borderRadius: 12, padding: 6, minWidth: 240,
+              boxShadow: '0 8px 32px rgba(0,0,0,0.18)',
+              display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2,
+            }}>
+              {AGENTS.map(agent => {
+                const Icon = AGENT_ICONS[agent.id]
+                const active = agent.id === activeAgentId
+                return (
+                  <button key={agent.id} onClick={() => { switchAgent(agent.id); setShowAgentMenu(false) }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 7, padding: '8px 10px',
+                      borderRadius: 8, border: 'none', cursor: 'pointer', textAlign: 'left',
+                      background: active ? `${agent.color}18` : 'transparent',
+                      color: active ? agent.color : 'var(--text)',
+                      fontFamily: 'Raleway, sans-serif', fontWeight: active ? 800 : 600, fontSize: 12,
+                      transition: 'background .1s',
+                    }}
+                    onMouseEnter={e => { if (!active) e.currentTarget.style.background = 'var(--faint)' }}
+                    onMouseLeave={e => { if (!active) e.currentTarget.style.background = 'transparent' }}
+                  >
+                    <div style={{ width: 22, height: 22, borderRadius: 6, background: `${agent.color}20`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <Icon size={12} style={{ color: agent.color }} />
+                    </div>
+                    <span style={{ flex: 1 }}>{agent.shortLabel}</span>
+                    {active && <div style={{ width: 6, height: 6, borderRadius: '50%', background: agent.color, flexShrink: 0 }} />}
+                  </button>
+                )
+              })}
+            </div>
+          )}
+        </div>
 
         <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
           {/* Tab switcher */}
