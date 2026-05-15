@@ -8,21 +8,26 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 )
 
-const DIGEST_SYSTEM = `You are an expert academic paper summarizer. Given paper content, extract:
-1. A concise summary (2-3 sentences) explaining the key contribution
-2. Key findings (3-5 bullet points)
-3. Methodology (1 sentence)
-4. Relevance to: temporal networks, critical transitions, early warning signals, machine learning on graphs
-5. Dissertation relevance score 1-5
+const DIGEST_SYSTEM = `You are an expert academic paper summarizer specializing in temporal networks, graph machine learning, critical transitions, and early warning signals.
 
-Respond in this exact JSON format:
+Given a paper, extract ALL of the following. Respond ONLY in this exact JSON format:
 {
-  "summary": "...",
-  "key_findings": ["...", "..."],
-  "methodology": "...",
-  "relevance_note": "...",
-  "dissertation_relevance": 4
-}`
+  "summary": "2-3 sentence plain-language summary of the core contribution",
+  "key_findings": ["finding 1", "finding 2", "finding 3", "finding 4"],
+  "methodology": "1 sentence describing the research design and approach",
+  "relevance_note": "1-2 sentences on relevance to temporal networks / critical transitions / early warning signals / graph ML",
+  "dissertation_relevance": 4,
+  "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
+  "category": "one of: Temporal Networks | Graph ML | Critical Transitions | Early Warning Signals | Data Fusion | Representativeness | Methodology | Other",
+  "themes": ["theme1", "theme2", "theme3"]
+}
+
+Rules:
+- tags: 5-8 short lowercase keywords specific to this paper (e.g. "link prediction", "rolling window", "bifurcation")
+- category: pick the SINGLE best fit from the fixed list above
+- themes: 2-4 broader research themes this paper touches (e.g. "network dynamics", "anomaly detection")
+- dissertation_relevance: 1-5 score for relevance to a dissertation on representativeness and data fusion in temporal networks
+- Never return null fields — use empty array [] if truly nothing fits`
 
 export async function digestPaper(paperId: string, paperText: string): Promise<{
   ok: boolean
@@ -39,13 +44,29 @@ export async function digestPaper(paperId: string, paperText: string): Promise<{
     if (!jsonMatch) throw new Error('No JSON in Haiku response')
     const parsed = JSON.parse(jsonMatch[0])
 
-    // Save to Supabase
+    // Save to Supabase — all Haiku-extracted fields
     await supabase.from('research_papers').update({
-      summary: parsed.summary,
-      notes: `Key findings:\n${parsed.key_findings?.map((f: string) => `• ${f}`).join('\n')}\n\nMethodology: ${parsed.methodology}\n\nRelevance: ${parsed.relevance_note}`,
+      summary:                parsed.summary,
       dissertation_relevance: parsed.dissertation_relevance,
+      tags:                   parsed.tags ?? [],
+      notes:                  [
+        `**Key Findings:**\n${(parsed.key_findings ?? []).map((f: string) => `• ${f}`).join('\n')}`,
+        `**Methodology:** ${parsed.methodology}`,
+        `**Relevance:** ${parsed.relevance_note}`,
+        `**Themes:** ${(parsed.themes ?? []).join(', ')}`,
+      ].join('\n\n'),
+      // Store category and themes in tags array prefixed for easy filtering
       updated_at: new Date().toISOString(),
     }).eq('id', paperId)
+
+    // Store category + themes as structured metadata in a separate upsert
+    // We reuse the tags column for category/themes with a prefix convention
+    const allTags = [
+      ...(parsed.tags ?? []),
+      `category:${parsed.category ?? 'Other'}`,
+      ...(parsed.themes ?? []).map((t: string) => `theme:${t}`),
+    ]
+    await supabase.from('research_papers').update({ tags: allTags }).eq('id', paperId)
 
     // Log token usage for budget tracking
     await supabase.from('agent_token_usage').insert({

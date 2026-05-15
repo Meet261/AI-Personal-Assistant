@@ -21,6 +21,18 @@ async function extractTextFromStoredPdf(paperId: string): Promise<string> {
   } catch { return '' }
 }
 
+// Build digest text from paper metadata when no PDF is available
+function buildTextFromMetadata(paper: Record<string, string | number | null | undefined>): string {
+  return [
+    `Title: ${paper.title}`,
+    `Authors: ${paper.authors}`,
+    paper.year ? `Year: ${paper.year}` : '',
+    paper.journal ? `Journal: ${paper.journal}` : '',
+    paper.abstract ? `Abstract: ${paper.abstract}` : '',
+    paper.notes ? `Notes: ${String(paper.notes).slice(0, 1000)}` : '',
+  ].filter(Boolean).join('\n\n')
+}
+
 // GET /api/agents/paper-digester — list undigested papers
 export async function GET() {
   const { data } = await supabase
@@ -45,26 +57,33 @@ export async function POST(req: NextRequest) {
     const paperId = params.paper_id as string
     if (!paperId) return NextResponse.json({ ok: false, message: 'paper_id required' }, { status: 400 })
 
-    const text = await extractTextFromStoredPdf(paperId)
+    // Try PDF first, fall back to metadata
+    let text = await extractTextFromStoredPdf(paperId)
     if (!text || text.trim().length < 200) {
-      return NextResponse.json({ ok: false, message: 'No PDF text found for this paper — upload the PDF first' })
+      const { data: paper } = await supabase
+        .from('research_papers')
+        .select('title,authors,year,journal,abstract,notes')
+        .eq('id', paperId).single()
+      if (!paper) return NextResponse.json({ ok: false, message: 'Paper not found' })
+      text = buildTextFromMetadata(paper)
+    }
+    if (!text || text.trim().length < 50) {
+      return NextResponse.json({ ok: false, message: 'Not enough paper content to digest' })
     }
 
     const result = await digestPaper(paperId, text)
-    if (result.ok) {
-      // Re-embed with updated summary
-      await executeKnowledgeAction('embed_paper', { paper_id: paperId }).catch(() => {})
-    }
+    if (result.ok) await executeKnowledgeAction('embed_paper', { paper_id: paperId }).catch(() => {})
     return NextResponse.json(result)
   }
 
   if (action === 'digest_all') {
-    // Get all papers without summaries
-    const { data: papers } = await supabase
-      .from('research_papers')
-      .select('id,title')
-      .is('summary', null)
+    const force = params.force === true
+    // Fetch all paper metadata in one shot
+    let q = supabase.from('research_papers')
+      .select('id,title,authors,year,journal,abstract,notes')
       .limit(50)
+    if (!force) q = q.is('summary', null)
+    const { data: papers } = await q
 
     if (!papers?.length) return NextResponse.json({ ok: true, message: 'All papers already digested' })
 
@@ -72,8 +91,10 @@ export async function POST(req: NextRequest) {
     const failed: string[] = []
 
     for (const paper of papers) {
-      const text = await extractTextFromStoredPdf(paper.id)
-      if (!text || text.trim().length < 200) { failed.push(paper.title + ' (no PDF)'); continue }
+      // Try PDF first, fall back to metadata
+      let text = await extractTextFromStoredPdf(paper.id)
+      if (!text || text.trim().length < 200) text = buildTextFromMetadata(paper)
+      if (!text || text.trim().length < 50) { failed.push(paper.title + ' (no content)'); continue }
 
       const result = await digestPaper(paper.id, text)
       if (result.ok) {
