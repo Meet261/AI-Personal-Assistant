@@ -109,6 +109,15 @@ function buildPaperDoc(paper: {
 
 // ── Main executor ─────────────────────────────────────────────────────────
 export async function executeKnowledgeAction(action: string, params: Record<string, unknown>) {
+  try {
+    return await _executeKnowledgeAction(action, params)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { ok: false, message: `Knowledge agent error: ${msg}` }
+  }
+}
+
+async function _executeKnowledgeAction(action: string, params: Record<string, unknown>) {
 
   // Always check ChromaDB first
   const chromaUp = await checkChroma()

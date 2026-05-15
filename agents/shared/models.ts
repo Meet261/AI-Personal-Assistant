@@ -53,18 +53,23 @@ export async function callOllama(
   systemPrompt: string,
   model = DEFAULT_LOCAL_MODEL
 ): Promise<string> {
-  const res = await fetch(`${OLLAMA_BASE}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      messages: [{ role: 'system', content: systemPrompt }, ...messages],
-      stream: false,
-    }),
-  })
-  if (!res.ok) throw new Error(`Ollama error: ${res.statusText}`)
-  const data = await res.json()
-  return (data.message?.content as string ?? '').replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+  try {
+    const res = await fetch(`${OLLAMA_BASE}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model,
+        messages: [{ role: 'system', content: systemPrompt }, ...messages],
+        stream: false,
+      }),
+    })
+    if (!res.ok) throw new Error(`Ollama HTTP ${res.status}: ${res.statusText}`)
+    const data = await res.json()
+    return (data.message?.content as string ?? '').replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    throw new Error(`Ollama unreachable (is it running?): ${msg}`)
+  }
 }
 
 // Call Claude Haiku (API)
@@ -75,20 +80,26 @@ export async function callHaiku(
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) throw new Error('ANTHROPIC_API_KEY not set — needed for Paper Digester')
 
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 1024,
-      system: systemPrompt,
-      messages,
-    }),
-  })
+  let res: Response
+  try {
+    res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1024,
+        system: systemPrompt,
+        messages,
+      }),
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    throw new Error(`Haiku API unreachable: ${msg}`)
+  }
   if (!res.ok) {
     const err = await res.text()
     throw new Error(`Haiku error: ${res.status} ${err}`)

@@ -165,12 +165,17 @@ export async function executeHabitAction(action: string, params: Record<string, 
         <p style="color:#6b7280;font-size:12px;margin-top:24px">Sent by your Personal Assistant</p>
       </div>`
 
-      await transporter.sendMail({
-        from: `"Personal Assistant" <${gmailUser}>`,
-        to: toEmail,
-        subject: `✅ Weekly Habit Report — ${overall}% overall`,
-        html,
-      })
+      try {
+        await transporter.sendMail({
+          from: `"Personal Assistant" <${gmailUser}>`,
+          to: toEmail,
+          subject: `✅ Weekly Habit Report — ${overall}% overall`,
+          html,
+        })
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err)
+        return { ok: false, message: `Failed to send habit digest email: ${msg}` }
+      }
       return { ok: true, message: `Weekly habit digest emailed to ${toEmail} (${overall}% overall)` }
     }
 

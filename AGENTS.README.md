@@ -348,8 +348,8 @@ Everything else?                            →  Ollama deepseek-r1:7b
 
 ### Phase 6 — Full Cascade
 - [ ] Trading → Journal → Scheduler chain
-- [ ] Paper Digester auto-webhook on new paper
-- [ ] Knowledge Agent auto-queries in Research Agent writing mode
+- [x] Paper Digester auto-webhook on new paper (app/api/research/pdfs/route.ts → autoDigest())
+- [x] Knowledge Agent auto-queries in Research Agent writing mode (draft_section, outline_chapter, find_citations_for)
 
 ---
 

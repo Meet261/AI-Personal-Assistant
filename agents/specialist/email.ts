@@ -27,11 +27,16 @@ async function withImap<T>(fn: (client: import('imapflow').ImapFlow) => Promise<
     auth: { user: GMAIL_USER, pass: GMAIL_PASS },
     logger: false,
   })
-  await client.connect()
+  try {
+    await client.connect()
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    throw new Error(`Gmail IMAP connection failed (check GMAIL_USER / GMAIL_APP_PASSWORD): ${msg}`)
+  }
   try {
     return await fn(client)
   } finally {
-    await client.logout()
+    await client.logout().catch(() => {})
   }
 }
 
@@ -50,6 +55,15 @@ function extractText(parsed: { text?: string | boolean | null; html?: string | b
 
 // ── Main executor ─────────────────────────────────────────────────────────
 export async function executeEmailAction(action: string, params: Record<string, unknown>): Promise<{ ok: boolean; message: string; data?: unknown }> {
+  try {
+    return await _executeEmailAction(action, params)
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    return { ok: false, message: `Email agent error: ${msg}` }
+  }
+}
+
+async function _executeEmailAction(action: string, params: Record<string, unknown>): Promise<{ ok: boolean; message: string; data?: unknown }> {
   if (!GMAIL_USER || !GMAIL_PASS) {
     return { ok: false, message: 'Gmail not configured — set GMAIL_USER and GMAIL_APP_PASSWORD in .env.local' }
   }
