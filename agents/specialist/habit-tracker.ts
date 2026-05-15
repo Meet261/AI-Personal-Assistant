@@ -9,9 +9,72 @@ const supabase = createClient(
 export async function executeHabitAction(action: string, params: Record<string, unknown>) {
   switch (action) {
     case 'get_habits': {
-      const { data } = await supabase.from('habits').select('*').order('created_at')
+      const { data } = await supabase.from('habits').select('*').eq('active', true).order('created_at')
       return { ok: true, message: `${data?.length || 0} habits`, data }
     }
+
+    case 'create_habit': {
+      const { error, data } = await supabase.from('habits').insert({
+        name:        params.name,
+        description: params.description ?? null,
+        frequency:   params.frequency ?? 'daily',
+        target_days: params.target_days ?? [],
+        color:       params.color ?? '#0F766E',
+      }).select().single()
+      if (error) return { ok: false, message: error.message }
+      return { ok: true, message: `Habit "${data.name}" created`, data }
+    }
+
+    case 'update_habit': {
+      const { error } = await supabase.from('habits').update({
+        name:        params.name,
+        description: params.description,
+        color:       params.color,
+        active:      params.active,
+      }).eq('id', params.id)
+      if (error) return { ok: false, message: error.message }
+      return { ok: true, message: 'Habit updated' }
+    }
+
+    case 'delete_habit': {
+      const { error } = await supabase.from('habits').delete().eq('id', params.id)
+      if (error) return { ok: false, message: error.message }
+      return { ok: true, message: 'Habit deleted' }
+    }
+
+    case 'get_grid': {
+      // Returns 28-day completion grid for all active habits
+      const since = new Date(Date.now() - 27 * 86400000).toISOString().slice(0, 10)
+      const { data: habits } = await supabase.from('habits').select('id,name,color').eq('active', true).order('created_at')
+      if (!habits?.length) return { ok: true, message: 'No habits', data: [] }
+      const { data: logs } = await supabase.from('habit_logs')
+        .select('habit_id,date,completed').gte('date', since)
+      const logSet = new Set((logs ?? []).filter(l => l.completed).map(l => `${l.habit_id}:${l.date}`))
+      const days: string[] = []
+      for (let i = 27; i >= 0; i--) {
+        days.push(new Date(Date.now() - i * 86400000).toISOString().slice(0, 10))
+      }
+      const grid = habits.map(h => ({
+        ...h,
+        days: days.map(d => ({ date: d, done: logSet.has(`${h.id}:${d}`) })),
+        doneCount: days.filter(d => logSet.has(`${h.id}:${d}`)).length,
+      }))
+      return { ok: true, message: `Grid for ${habits.length} habits`, data: { grid, days } }
+    }
+
+    case 'toggle_today': {
+      // Toggle completion for today
+      const today = new Date().toISOString().slice(0, 10)
+      const { data: existing } = await supabase.from('habit_logs')
+        .select('id,completed').eq('habit_id', params.habit_id).eq('date', today).single()
+      const newCompleted = existing ? !existing.completed : true
+      const { error } = await supabase.from('habit_logs').upsert({
+        habit_id: params.habit_id, date: today, completed: newCompleted,
+      }, { onConflict: 'habit_id,date' })
+      if (error) return { ok: false, message: error.message }
+      return { ok: true, message: newCompleted ? 'Marked complete ✓' : 'Unmarked', data: { completed: newCompleted } }
+    }
+
     case 'log_habit': {
       const today = new Date().toISOString().slice(0, 10)
       const { error } = await supabase.from('habit_logs').upsert({
