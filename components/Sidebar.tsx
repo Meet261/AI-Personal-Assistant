@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import {
   LayoutDashboard, FolderKanban, CheckSquare,
   BookOpen, MessageSquare, Sunrise, Moon, Bot,
-  Leaf, Command, Timer,
+  Leaf, Command, Timer, Layers,
 } from 'lucide-react'
 import { useCmdK } from './CmdKProvider'
 
@@ -18,6 +18,7 @@ const nav = [
   { href: '/briefing/morning', label: 'Morning Brief',  icon: Sunrise },
   { href: '/briefing/evening', label: 'Evening Summary',icon: Moon },
   { href: '/agent',            label: 'AI Agent',       icon: Bot },
+  { href: '/agents',           label: 'Agents Hub',     icon: Layers },
   { href: '/timer',            label: 'Work Timer',     icon: Timer },
 ]
 

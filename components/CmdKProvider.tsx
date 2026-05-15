@@ -21,6 +21,7 @@ export interface AgentMessage {
   ts: Date
   toolResults?: { ok: boolean; message: string; data?: unknown }[]
   isLoading?: boolean
+  routedTo?: string
 }
 
 interface CmdKCtx {

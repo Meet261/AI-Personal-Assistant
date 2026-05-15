@@ -191,6 +191,11 @@ export default function Dashboard() {
   const [loading, setLoading]       = useState(true)
   const [modal, setModal]           = useState<{ title: string; subtitle: string; tasks: Task[]; color: string } | null>(null)
   const [drawerTask, setDrawerTask] = useState<Task | null>(null)
+  const [trading, setTrading]       = useState<{
+    running: boolean; total_trades: number; today_trades: number
+    total_pnl: number; today_pnl: number; wins: number; losses: number
+    win_rate: number; open_positions: number; symbols: string[]
+  } | null>(null)
   const today = format(new Date(), 'yyyy-MM-dd')
 
   const load = useCallback(async () => {
@@ -213,6 +218,10 @@ export default function Dashboard() {
   }, [today])
 
   useEffect(() => { load() }, [load])
+
+  useEffect(() => {
+    fetch('/api/trading/summary').then(r => r.ok ? r.json() : null).then(d => { if (d) setTrading(d) }).catch(() => {})
+  }, [])
 
   const urgent     = tasks.filter(t => t.priority === 'urgent')
   const high       = tasks.filter(t => t.priority === 'high')
@@ -305,6 +314,38 @@ export default function Dashboard() {
           </button>
         ))}
       </div>
+
+      {/* ══ TRADING WIDGET ══ */}
+      {trading && (
+        <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderLeft: `3px solid ${trading.today_pnl >= 0 ? '#27d98a' : '#ff5c7a'}`, borderRadius: 16, padding: '14px 20px', marginBottom: 20, display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap', boxShadow: 'var(--shadow-sm)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: trading.running ? '#27d98a' : '#ff5c7a', boxShadow: trading.running ? '0 0 6px #27d98a80' : 'none' }} />
+            <span style={{ fontFamily: 'Raleway, sans-serif', fontWeight: 800, fontSize: 13, color: 'var(--text)' }}>Trading Agent</span>
+            {trading.open_positions > 0 && (
+              <span style={{ fontSize: 10, fontFamily: 'Raleway, sans-serif', fontWeight: 700, background: 'rgba(255,204,102,.15)', color: '#ffcc66', padding: '2px 7px', borderRadius: 8 }}>
+                {trading.symbols.join(' & ')} OPEN
+              </span>
+            )}
+          </div>
+          <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+            {[
+              { label: "Today's P&L", value: `$${trading.today_pnl >= 0 ? '+' : ''}${trading.today_pnl.toFixed(2)}`, color: trading.today_pnl >= 0 ? '#27d98a' : '#ff5c7a' },
+              { label: 'Today Trades', value: String(trading.today_trades), color: 'var(--text)' },
+              { label: 'Win Rate', value: `${trading.win_rate}%`, color: trading.win_rate >= 60 ? '#27d98a' : trading.win_rate >= 45 ? '#ffcc66' : '#ff5c7a' },
+              { label: 'W / L', value: `${trading.wins} / ${trading.losses}`, color: 'var(--text)' },
+            ].map(m => (
+              <div key={m.label}>
+                <p style={{ fontFamily: 'Lato, sans-serif', fontSize: 10, color: 'var(--muted)', margin: '0 0 2px', textTransform: 'uppercase', letterSpacing: '.05em' }}>{m.label}</p>
+                <p style={{ fontFamily: 'Raleway, sans-serif', fontWeight: 800, fontSize: 16, color: m.color, margin: 0 }}>{m.value}</p>
+              </div>
+            ))}
+          </div>
+          <a href="http://localhost:8000/ui" target="_blank" rel="noopener noreferrer"
+            style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontFamily: 'Raleway, sans-serif', fontWeight: 700, color: 'var(--muted)', textDecoration: 'none', flexShrink: 0 }}>
+            <ArrowUpRight size={13} /> Dashboard
+          </a>
+        </div>
+      )}
 
       {/* ══ MAIN LAYOUT: left wide col + right sidebar ══ */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 18, alignItems: 'start' }}>
