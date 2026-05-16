@@ -43,6 +43,14 @@ yarn-error.log*
 # artifacts
 /ui/
 
+# runtime files
+.chroma-data/
+.research-enabled
+PIPELINE_LOG.md
+
+# uploaded plan files
+*.zip
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

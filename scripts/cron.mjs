@@ -32,18 +32,17 @@ const NOTIFY_EMAIL = process.env.BRIEFING_NOTIFY_EMAIL || GMAIL_USER
 
 function pad(n) { return String(n).padStart(2, '0') }
 
+// Fires at an exact hour:minute each day (used for scheduler + habit digest)
 function scheduleDaily(hour, minute, label, fn) {
   let firedToday = false
   let lastDate   = ''
 
   function tick() {
     const now  = new Date()
-    // Use local date (not UTC) so the date matches the local clock hour
     const date = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
     const h    = now.getHours()
     const m    = now.getMinutes()
 
-    // Reset fired flag at local midnight
     if (date !== lastDate) { firedToday = false; lastDate = date }
 
     if (h === hour && m === minute && !firedToday) {
@@ -52,7 +51,33 @@ function scheduleDaily(hour, minute, label, fn) {
       fn(date).catch(e => console.error(`[cron] ${label} failed:`, e))
     }
 
-    setTimeout(tick, 30_000) // check every 30 s for ±30 s accuracy
+    setTimeout(tick, 30_000)
+  }
+  tick()
+}
+
+// Fires on the FIRST tick within a time window each day.
+// Perfect for "send as soon as laptop wakes up between startHour and endHour".
+// Only fires once per day no matter how many times the lid opens/closes.
+function scheduleWindow(startHour, endHour, label, fn) {
+  let firedToday = false
+  let lastDate   = ''
+
+  function tick() {
+    const now  = new Date()
+    const date = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
+    const h    = now.getHours()
+
+    // Reset at midnight
+    if (date !== lastDate) { firedToday = false; lastDate = date }
+
+    if (h >= startHour && h < endHour && !firedToday) {
+      firedToday = true
+      console.log(`[cron] ${pad(h)}:00 window — running: ${label}`)
+      fn(date).catch(e => console.error(`[cron] ${label} failed:`, e))
+    }
+
+    setTimeout(tick, 30_000)
   }
   tick()
 }
@@ -177,19 +202,27 @@ function buildEmailHtml(type, date, content, priorities) {
 }
 
 // ── Orchestrate ──────────────────────────────────────────────────────────────
+async function isServerUp() {
+  try {
+    const res = await fetch(`${APP_URL}/api/briefing`, { method: 'GET', signal: AbortSignal.timeout(3000) })
+    return res.status < 500
+  } catch { return false }
+}
+
 async function runBriefing(type, date) {
   console.log(`[cron] Generating ${type} briefing for ${date}…`)
-  const { content, top_priorities } = await streamBriefing(type, date)
-
-  console.log(`[cron] Saving to DB…`)
-  await saveBriefing(date, type, content, top_priorities)
-
-  const subject = type === 'morning'
-    ? `☀️ Morning Briefing — ${date}`
-    : `🌙 Evening Summary — ${date}`
-
-  await sendEmail(subject, buildEmailHtml(type, date, content, top_priorities))
-  console.log(`[cron] ✓ ${type} briefing complete`)
+  try {
+    const { content, top_priorities } = await streamBriefing(type, date)
+    console.log(`[cron] Saving to DB…`)
+    await saveBriefing(date, type, content, top_priorities)
+    const subject = type === 'morning'
+      ? `☀️ Morning Briefing — ${date}`
+      : `🌙 Evening Summary — ${date}`
+    await sendEmail(subject, buildEmailHtml(type, date, content, top_priorities))
+    console.log(`[cron] ✓ ${type} briefing complete`)
+  } catch (e) {
+    console.error(`[cron] ✗ ${type} briefing failed:`, e.message)
+  }
 }
 
 // ── Nightly scheduler cron (22:00) ──────────────────────────────────────────
@@ -224,12 +257,12 @@ async function runHabitDigest(date) {
 
 // ── Start ────────────────────────────────────────────────────────────────────
 console.log('[cron] Scheduler started')
-console.log('[cron]   Morning briefing:        08:00 daily')
-console.log('[cron]   Evening summary:         21:00 daily')
+console.log('[cron]   Morning briefing:        first open 06:00–12:00')
+console.log('[cron]   Evening summary:         first open after 18:00')
 console.log('[cron]   Nightly scheduler cron:  21:00 daily')
 console.log('[cron]   Weekly habit digest:     20:00 Sunday')
 
-scheduleDaily(8,  0, 'Morning Briefing',      date => runBriefing('morning', date))
-scheduleDaily(21, 0, 'Evening Summary',        date => runBriefing('evening', date))
-scheduleDaily(21, 0, 'Nightly Scheduler Cron', date => runNightlyScheduler(date))
-scheduleDaily(20, 0, 'Weekly Habit Digest',    date => runHabitDigest(date))
+scheduleWindow(6,  12, 'Morning Briefing',      date => runBriefing('morning', date))
+scheduleWindow(18, 24, 'Evening Summary',        date => runBriefing('evening', date))
+scheduleDaily(21,  0,  'Nightly Scheduler Cron', date => runNightlyScheduler(date))
+scheduleDaily(20,  0,  'Weekly Habit Digest',    date => runHabitDigest(date))
