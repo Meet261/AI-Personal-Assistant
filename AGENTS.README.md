@@ -347,7 +347,7 @@ Everything else?                            →  Ollama deepseek-r1:7b
 - [x] All email processing local via Ollama — never sent to cloud
 
 ### Phase 6 — Full Cascade
-- [ ] Trading → Journal → Scheduler chain
+- [x] Trading → Journal → Scheduler chain
 - [x] Paper Digester auto-webhook on new paper (app/api/research/pdfs/route.ts → autoDigest())
 - [x] Knowledge Agent auto-queries in Research Agent writing mode (draft_section, outline_chapter, find_citations_for)
 
