@@ -66,16 +66,18 @@ export async function POST(req: NextRequest) {
       closeTime = cols[7]?.trim() ?? ''
       exitPrice = parseFloat(cols[8]) || 0
       profit = parseFloat(cols[9]) || 0
-      ticket = cols[11]?.trim() ?? String(i)  // ticket often last
+      ticket = cols[11]?.trim() || ''
     }
 
     if (!symbol || !action || !entryPrice) continue
-    if (ticket && existing.has(ticket)) continue
+    // Deterministic dedup key: if no ticket, derive from trade fingerprint so re-imports don't skip real trades
+    const dedupeKey = ticket || `${symbol}|${openTime}|${closeTime}|${profit}|${lots}`
+    if (existing.has(dedupeKey)) continue
 
     const closeReason = profit > 0 ? 'tp' : profit < 0 ? 'sl' : 'manual'
     const row = `,${ticket},0,0,${closeTime},${openTime},${symbol},${action},${entryPrice},${exitPrice},${lots},${profit},20260508,${closeReason},0.0,0.0`
     newRows.push(row)
-    if (ticket) existing.add(ticket)
+    existing.add(dedupeKey)
     added++
   }
 

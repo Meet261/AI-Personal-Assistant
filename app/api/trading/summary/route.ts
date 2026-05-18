@@ -1,65 +1,46 @@
 import { NextResponse } from 'next/server'
-import { readFileSync, existsSync } from 'fs'
-import { join } from 'path'
+import { executeTradingAction } from '@/agents/specialist/trading'
 
-const TRADES_CSV = join(process.cwd(), '..', 'Trading Agent', 'trading_agent', 'logs', 'trades.csv')
-const RISK_JSON  = join(process.cwd(), '..', 'Trading Agent', 'trading_agent', 'logs', 'risk_state.json')
-
-function parseCSV(text: string) {
-  const lines = text.trim().split('\n')
-  const headers = lines[0].split(',').map(h => h.trim())
-  return lines.slice(1).map(line => {
-    const vals = line.split(',')
-    return Object.fromEntries(headers.map((h, i) => [h, vals[i]?.trim() ?? '']))
-  })
-}
-
+// Single source of truth: all CSV parsing lives in agents/specialist/trading.ts
 export async function GET() {
   try {
-    let trades: Record<string, string>[] = []
-    let openPositions: Record<string, boolean> = {}
-    let tradingRunning = false
-
-    // Check if trading agent is up
+    // Check if trading agent is live
+    let running = false
     try {
       const r = await fetch('http://localhost:8000/health', { signal: AbortSignal.timeout(1000) })
-      tradingRunning = r.ok
+      running = r.ok
     } catch {}
 
-    if (existsSync(TRADES_CSV)) {
-      trades = parseCSV(readFileSync(TRADES_CSV, 'utf-8'))
-    }
+    const [summary, todayResult, riskResult] = await Promise.all([
+      executeTradingAction('get_performance_summary', {}),
+      executeTradingAction('get_today_trades', {}),
+      executeTradingAction('get_risk_state', {}),
+    ])
 
-    if (existsSync(RISK_JSON)) {
-      const risk = JSON.parse(readFileSync(RISK_JSON, 'utf-8'))
-      openPositions = risk.open_positions ?? {}
-    }
+    const perf = summary.data as {
+      total: number; wins: number; losses: number
+      winRate: string; totalPnl: string; avgTrade: string; maxDrawdown: string
+    } | null
 
-    const profits = trades.map(t => parseFloat(t.profit)).filter(p => !isNaN(p))
-    const totalPnl = profits.reduce((a, b) => a + b, 0)
-    const wins = profits.filter(p => p > 0).length
-    const losses = profits.filter(p => p <= 0).length
-    const winRate = profits.length > 0 ? wins / profits.length : 0
+    const todayData = (todayResult.data as { trades: unknown[]; summary: { count: number; pnl: string; wins: number; losses: number } } | null)
+    const risk = riskResult.data as { open_positions?: Record<string, boolean> } | null
+
+    // Only trust open positions when agent is live (stale file otherwise)
+    const openPositions = running ? (risk?.open_positions ?? {}) : {}
     const openCount = Object.values(openPositions).filter(Boolean).length
-
-    // Today's trades
-    const today = new Date().toISOString().slice(0, 10).replace(/-/g, '.')
-    const todayTrades = trades.filter(t => t.close_time?.startsWith(today) || t.open_time?.startsWith(today))
-    const todayPnl = todayTrades.map(t => parseFloat(t.profit)).filter(p => !isNaN(p)).reduce((a, b) => a + b, 0)
+    const symbols = Object.entries(openPositions).filter(([, v]) => v).map(([k]) => k)
 
     return NextResponse.json({
-      running: tradingRunning,
-      total_trades: profits.length,
-      total_pnl: Math.round(totalPnl * 100) / 100,
-      today_pnl: Math.round(todayPnl * 100) / 100,
-      today_trades: todayTrades.length,
-      wins,
-      losses,
-      win_rate: Math.round(winRate * 1000) / 10,
+      running,
+      total_trades: perf?.total ?? 0,
+      total_pnl: parseFloat(perf?.totalPnl ?? '0'),
+      today_pnl: parseFloat(todayData?.summary?.pnl ?? '0'),
+      today_trades: todayData?.summary?.count ?? 0,
+      wins: perf?.wins ?? 0,
+      losses: perf?.losses ?? 0,
+      win_rate: parseFloat(perf?.winRate ?? '0'),
       open_positions: openCount,
-      symbols: Object.entries(openPositions)
-        .filter(([, v]) => v)
-        .map(([k]) => k),
+      symbols,
     })
   } catch (e) {
     return NextResponse.json({ error: String(e), running: false }, { status: 500 })

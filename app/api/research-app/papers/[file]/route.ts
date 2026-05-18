@@ -10,9 +10,16 @@ export async function GET(
   { params }: { params: Promise<{ file: string }> }
 ) {
   const { file } = await params
-  // Sanitise — no path traversal
+  // Reject any path containing .. to prevent directory traversal
+  if (file.includes('..') || file.includes('/') || file.includes('\\')) {
+    return new NextResponse('Invalid filename', { status: 400 })
+  }
   const safe = file.replace(/[^a-zA-Z0-9.\-_ ()']/g, '')
   const filePath = join(PAPERS_DIR, safe)
+  // Double-check resolved path stays inside PAPERS_DIR
+  if (!filePath.startsWith(PAPERS_DIR)) {
+    return new NextResponse('Invalid filename', { status: 400 })
+  }
 
   if (!existsSync(filePath)) {
     return new NextResponse('PDF not found', { status: 404 })

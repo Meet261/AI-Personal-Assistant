@@ -43,12 +43,16 @@ function streamBriefing(prompt: string, model: string): ReadableStream<Uint8Arra
 
         const reader = res.body!.getReader()
         const decoder = new TextDecoder()
+        let streamBuf = ''  // buffer for incomplete JSON lines
 
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
 
-          const lines = decoder.decode(value).split('\n').filter(Boolean)
+          streamBuf += decoder.decode(value, { stream: true })
+          const rawLines = streamBuf.split('\n')
+          streamBuf = rawLines.pop() ?? '' // keep incomplete last line
+          const lines = rawLines.filter(Boolean)
           for (const line of lines) {
             try {
               const json = JSON.parse(line)
