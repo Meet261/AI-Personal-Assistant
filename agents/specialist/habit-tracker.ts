@@ -87,22 +87,33 @@ export async function executeHabitAction(action: string, params: Record<string, 
       return { ok: true, message: 'Habit logged' }
     }
     case 'get_streaks': {
-      const { data: habits } = await supabase.from('habits').select('id,name')
+      // Single batch query — fetch all logs for last 60 days, compute streaks in memory
+      const [{ data: habits }, { data: allLogs }] = await Promise.all([
+        supabase.from('habits').select('id,name').eq('active', true),
+        supabase.from('habit_logs')
+          .select('habit_id,date,completed')
+          .eq('completed', true)
+          .gte('date', new Date(Date.now() - 60 * 86400000).toISOString().slice(0, 10))
+          .order('date', { ascending: false }),
+      ])
       if (!habits?.length) return { ok: true, message: 'No habits tracked', data: [] }
-      const streaks = await Promise.all(habits.map(async h => {
-        const { data: logs } = await supabase.from('habit_logs')
-          .select('date,completed').eq('habit_id', h.id).eq('completed', true)
-          .order('date', { ascending: false }).limit(60)
-        // Calculate current streak
+
+      const logsByHabit = new Map<string, Set<string>>()
+      for (const l of allLogs ?? []) {
+        if (!logsByHabit.has(l.habit_id)) logsByHabit.set(l.habit_id, new Set())
+        logsByHabit.get(l.habit_id)!.add(l.date)
+      }
+
+      const streaks = habits.map(h => {
+        const dates = logsByHabit.get(h.id) ?? new Set<string>()
         let streak = 0
-        const dates = logs?.map(l => l.date) ?? []
         let check = new Date()
-        while (dates.includes(check.toISOString().slice(0, 10))) {
+        while (dates.has(check.toISOString().slice(0, 10))) {
           streak++
           check = new Date(check.getTime() - 86400000)
         }
-        return { habit: h.name, streak, total: logs?.length ?? 0 }
-      }))
+        return { habit: h.name, streak, total: dates.size }
+      })
       return { ok: true, message: 'Current streaks', data: streaks }
     }
     case 'get_weekly_summary': {

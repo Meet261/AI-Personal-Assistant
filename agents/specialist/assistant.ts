@@ -211,11 +211,10 @@ If no action items, respond: []`
       const myItems = items.filter(i => !i.owner || i.owner.toLowerCase() === 'me')
       for (const item of myItems) {
         await supabase.from('tasks').insert({
-          title:    item.task,
+          title:    `[${meeting.title}] ${item.task}`,
           priority: 'medium',
           deadline: item.due || null,
           status:   'todo',
-          notes:    `From meeting: ${meeting.title}`,
         })
       }
 

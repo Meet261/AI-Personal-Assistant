@@ -57,6 +57,20 @@ export async function executeSchedulerAction(action: string, params: Record<stri
       await supabase.from('tasks').update({ scheduled_for: targetDate, updated_at: new Date().toISOString() }).in('id', overdue.map(t => t.id))
       return { ok: true, message: `Rescheduled ${overdue.length} overdue tasks to ${targetDate}`, data: overdue.map(t => t.title) }
     }
+    case 'dismiss_alert': {
+      const id = params.id as string
+      if (!id) return { ok: false, message: 'id required' }
+      const { error } = await supabase.from('scheduler_alerts').update({ dismissed: true }).eq('id', id)
+      if (error) return { ok: false, message: error.message }
+      return { ok: true, message: 'Alert dismissed' }
+    }
+
+    case 'dismiss_all_alerts': {
+      const { error } = await supabase.from('scheduler_alerts').update({ dismissed: true }).eq('dismissed', false)
+      if (error) return { ok: false, message: error.message }
+      return { ok: true, message: 'All alerts dismissed' }
+    }
+
     default:
       return { ok: false, message: `Unknown action: ${action}` }
   }

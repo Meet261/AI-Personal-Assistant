@@ -217,22 +217,22 @@ async function _executeKnowledgeAction(action: string, params: Record<string, un
       // Embed in batches of 10 to avoid overwhelming Ollama
       for (let i = 0; i < papers.length; i += 10) {
         const batch = papers.slice(i, i + 10)
-        await Promise.all(batch.map(async paper => {
-          try {
-            const docText  = buildPaperDoc(paper)
-            const embedding = await embed(docText)
-            await chromaUpsert(
-              colId,
-              [paper.id],
-              [embedding],
-              [docText],
-              [{ paper_id: paper.id, title: paper.title, authors: paper.authors ?? '', year: String(paper.year ?? '') }]
-            )
-            indexed++
-          } catch (e) {
-            failed.push(paper.title)
-          }
+        const results = await Promise.allSettled(batch.map(async paper => {
+          const docText  = buildPaperDoc(paper)
+          const embedding = await embed(docText)
+          await chromaUpsert(
+            colId,
+            [paper.id],
+            [embedding],
+            [docText],
+            [{ paper_id: paper.id, title: paper.title, authors: paper.authors ?? '', year: String(paper.year ?? '') }]
+          )
+          return paper.title
         }))
+        for (let j = 0; j < results.length; j++) {
+          if (results[j].status === 'fulfilled') indexed++
+          else failed.push(batch[j].title)
+        }
       }
 
       return {

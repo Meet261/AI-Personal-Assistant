@@ -62,6 +62,7 @@ export async function callOllama(
         messages: [{ role: 'system', content: systemPrompt }, ...messages],
         stream: false,
       }),
+      signal: AbortSignal.timeout(240_000), // 4 min max per LLM call
     })
     if (!res.ok) throw new Error(`Ollama HTTP ${res.status}: ${res.statusText}`)
     const data = await res.json()
