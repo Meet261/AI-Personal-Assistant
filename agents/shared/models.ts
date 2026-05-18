@@ -7,19 +7,27 @@ import type { ModelTier } from './types'
 export const OLLAMA_BASE = 'http://localhost:11434'
 export const DEFAULT_LOCAL_MODEL = 'deepseek-r1:7b'
 
+// Per-agent custom models — Modelfiles bake in 16K+ context, tuned temp, and domain system prompts
+// Create with: ollama create <name> -f modelfiles/Modelfile.<name>
+export const AGENT_MODELS: Record<string, string> = {
+  assistant:  'pa-assistant',   // deepseek-r1:7b + 16K ctx + productivity prompt
+  trading:    'pa-trading',     // plutus (finance fine-tune) + 8K ctx + discipline prompt
+  research:   'pa-research',    // deepseek-r1:7b + 32K ctx + critical analysis prompt
+}
+
 // Which model tier each agent uses
 export const AGENT_MODEL_TIERS: Record<string, ModelTier> = {
-  orchestrator:    'local',   // routing only
-  assistant:       'local',   // tasks, projects, meetings
-  research:        'local',   // papers, writing
-  trading:         'local',   // CSV reads, risk state, finance
-  journal:         'local',   // mood, energy, health logs
-  scheduler:       'local',   // week view, cron alerts, calendar
-  knowledge:       'local',   // RAG with nomic-embed-text + deepseek
-  'paper-digester':'haiku',   // PDF deep comprehension — only API spend
-  'habit-tracker': 'local',   // streaks, email digest
-  memory:          'local',   // cross-agent memory, code debug
-  email:           'local',   // Gmail IMAP/SMTP via Ollama triage
+  orchestrator:    'local',
+  assistant:       'local',
+  research:        'local',
+  trading:         'local',
+  journal:         'local',
+  scheduler:       'local',
+  knowledge:       'local',
+  'paper-digester':'haiku',
+  'habit-tracker': 'local',
+  memory:          'local',
+  email:           'local',
 }
 
 // Estimated tokens per call (for budget tracking)
@@ -48,6 +56,10 @@ export function estimateCost(agentId: string, calls: number): number {
 }
 
 // Call local Ollama
+export function modelForAgent(agentId: string): string {
+  return AGENT_MODELS[agentId] ?? DEFAULT_LOCAL_MODEL
+}
+
 export async function callOllama(
   messages: { role: string; content: string }[],
   systemPrompt: string,

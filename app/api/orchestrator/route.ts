@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { classifyIntent, buildAgentSystemPrompt, synthesize } from '@/agents/orchestrator'
 import { buildAgentContext } from '@/agents/shared/context'
-import { callOllama } from '@/agents/shared/models'
+import { callOllama, modelForAgent } from '@/agents/shared/models'
 import type { AgentId } from '@/agents/shared/types'
 
 // Specialist agent executors — imported inline to keep one API route
@@ -174,9 +174,8 @@ async function runAgent(
   let activeSystemPrompt = systemPrompt
   if (pre) {
     toolResults.push(pre.data)
-    // When data is pre-fetched, use a simpler system prompt that doesn't ask for tool calls
-    // This prevents the model from trying to call tools when data is already injected
-    activeSystemPrompt = `You are a helpful ${agentId} assistant. The data below has already been fetched from the database — do NOT emit tool blocks. Answer the user's question directly and concisely using this data.`
+    // Data already fetched — simplified prompt so model doesn't try to call tools again
+    activeSystemPrompt = `You are a helpful ${agentId} assistant. The data below has already been fetched — do NOT emit tool blocks. Answer the user's question directly and concisely using only this data.`
     const dataContext = `[Live data from ${agentId}]\n${JSON.stringify(pre.data, null, 2)}\n\nSummary: ${pre.summary}`
     augmentedMessages = [
       ...messages.slice(0, -1),
@@ -184,8 +183,9 @@ async function runAgent(
     ]
   }
 
-  // 2. LLM call — may still emit tool blocks for write operations (only when no pre-flight)
-  const raw = await callOllama(augmentedMessages, activeSystemPrompt)
+  // 2. LLM call — use per-agent custom model (baked-in context window + domain prompt)
+  const agentModel = modelForAgent(agentId)
+  const raw = await callOllama(augmentedMessages, activeSystemPrompt, agentModel)
 
   // 3. Parse any tool blocks (only ```tool fences — not json/code fences)
   let match
