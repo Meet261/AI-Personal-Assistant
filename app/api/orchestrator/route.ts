@@ -100,32 +100,36 @@ async function preflight(
   }
 
   if (agentId === 'research') {
-    // Fetch real papers — slim fields only to keep context small for 7b model
+    type PaperRow = { id: string; title: string; authors: string; year: number; tags: string[]; summary: string | null; dissertation_relevance: number | null; reading_status: string }
+    // For search queries: use semantic/keyword search for top 5 relevant papers (fast, focused)
+    // Always use ChromaDB semantic search — far more powerful than keyword matching
+    {
+      const [searchResult, projectsResult] = await Promise.all([
+        executeKnowledgeAction('search_knowledge', { query: userMessage, top_k: 5 }),
+        executeResearchAction('list_research_projects', {}),
+      ])
+      if (searchResult.ok && searchResult.data) {
+        type Hit = { title?: string; authors?: string; year?: string | number; score?: number; snippet?: string }
+        const hits = (searchResult.data as unknown as Hit[]).map(h => ({
+          title: h.title, authors: h.authors, year: h.year,
+          score: h.score, excerpt: h.snippet?.slice(0, 150),
+        }))
+        return {
+          data: { relevant_papers: hits, projects: projectsResult.data },
+          summary: `Top ${hits.length} semantically relevant papers from your library of 34.`,
+        }
+      }
+    }
+    // For general queries: inject compact library index (title + year only, up to 15)
     const [papersResult, projectsResult] = await Promise.all([
       executeResearchAction('list_papers', {}),
       executeResearchAction('list_research_projects', {}),
     ])
-    type PaperRow = { id: string; title: string; authors: string; year: number; tags: string[]; summary: string | null; dissertation_relevance: number | null; reading_status: string }
     const allPapers = (papersResult.data as PaperRow[] ?? [])
-    // Slim down: only fields the LLM needs, cap at 20
-    const slimPapers = allPapers.slice(0, 20).map(p => ({
-      title: p.title, authors: p.authors, year: p.year,
-      tags: p.tags?.slice(0, 4) ?? [],
-      relevance: p.dissertation_relevance,
-      status: p.reading_status,
-      has_summary: !!p.summary,
-    }))
-    // If search query, add keyword search results too
-    if (/find|search|about|related|on topic|which paper|recommend/i.test(m)) {
-      const searchResult = await executeResearchAction('search_papers', { query: userMessage })
-      return {
-        data: { papers: slimPapers, projects: projectsResult.data, searchResults: searchResult.data },
-        summary: `${allPapers.length} papers in library. Keyword search: ${searchResult.message}`,
-      }
-    }
+    const index = allPapers.slice(0, 15).map(p => `${p.title} (${p.authors?.split(',')[0] ?? ''}, ${p.year})`)
     return {
-      data: { papers: slimPapers, projects: projectsResult.data },
-      summary: `${allPapers.length} papers in your library, ${projectsResult.message}`,
+      data: { library_index: index, total: allPapers.length, projects: projectsResult.data },
+      summary: `${allPapers.length} papers in library, ${projectsResult.message}`,
     }
   }
 

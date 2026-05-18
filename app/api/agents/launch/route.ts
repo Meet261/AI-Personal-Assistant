@@ -189,10 +189,18 @@ export async function POST(req: NextRequest) {
       processes.delete(agent)
       return NextResponse.json({ ok: true, message: `Stopped ${agent}` })
     }
-    // Not managed by PA — try to kill by port
+    // Not managed by PA — kill by port and verify
     try {
       execSync(`lsof -ti :${cfg.port} | xargs kill -9 2>/dev/null || true`)
-      return NextResponse.json({ ok: true, message: `Killed process on port ${cfg.port}` })
+      // Wait up to 2s for port to clear
+      for (let i = 0; i < 4; i++) {
+        await new Promise(r => setTimeout(r, 500))
+        const pids = execSync(`lsof -ti :${cfg.port} 2>/dev/null || true`).toString().trim()
+        if (!pids) return NextResponse.json({ ok: true, message: `Stopped ${agent}` })
+        // Still running — kill again harder
+        if (pids) execSync(`kill -9 ${pids} 2>/dev/null || true`)
+      }
+      return NextResponse.json({ ok: true, message: `Stopped ${agent}` })
     } catch {
       return NextResponse.json({ ok: false, message: 'Could not stop process' })
     }

@@ -71,8 +71,6 @@ function TradeRow({ trade, isWin }: { trade: Trade; isWin: boolean }) {
   )
 }
 
-const STATUS_KEY = 'trading-agent-running'
-
 export default function TradingAgentPage() {
   const [summary, setSummary] = useState<TradeSummary | null>(null)
   const [trades, setTrades] = useState<Trade[]>([])
@@ -81,15 +79,11 @@ export default function TradingAgentPage() {
   const [loading, setLoading] = useState(true)
   const [tradeFilter, setTradeFilter] = useState<'all' | 'today' | 'wins' | 'losses'>('all')
   const [refreshing, setRefreshing] = useState(false)
-  // Initialise from localStorage so status shows immediately without waiting for fetch
-  const [agentRunning, setAgentRunning] = useState(() => {
-    if (typeof window === 'undefined') return false
-    return localStorage.getItem(STATUS_KEY) === '1'
-  })
+  // null = unknown (loading), true/false = confirmed from API
+  const [agentRunning, setAgentRunning] = useState<boolean | null>(null)
   const [controlling, setControlling] = useState(false)
 
   const setAndCacheRunning = useCallback((v: boolean) => {
-    localStorage.setItem(STATUS_KEY, v ? '1' : '0')
     setAgentRunning(v)
   }, [])
 
@@ -124,18 +118,29 @@ export default function TradingAgentPage() {
 
   const controlAgent = useCallback(async (action: 'start' | 'stop') => {
     setControlling(true)
-    // Optimistic update immediately
-    setAndCacheRunning(action === 'start')
+    setAndCacheRunning(action === 'start') // optimistic
     try {
       await fetch('/api/agents/trading', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action }),
       })
-      // Confirm real status after agent starts/stops
-      setTimeout(async () => {
-        const s = await fetch('/api/agents/trading').then(r => r.json()).catch(() => null)
-        if (s) setAndCacheRunning(s.running ?? false)
-      }, 2500)
+      if (action === 'start') {
+        // Poll until uvicorn is actually up (up to 10s)
+        for (let i = 0; i < 20; i++) {
+          await new Promise(r => setTimeout(r, 500))
+          const s = await fetch('/api/agents/trading').then(r => r.json()).catch(() => null)
+          if (s?.running) { setAndCacheRunning(true); break }
+        }
+      } else {
+        // For stop: poll until port is clear (up to 5s), then set final state
+        let stopped = false
+        for (let i = 0; i < 10; i++) {
+          await new Promise(r => setTimeout(r, 500))
+          const s = await fetch('/api/agents/trading').then(r => r.json()).catch(() => null)
+          if (!s?.running) { stopped = true; break }
+        }
+        setAndCacheRunning(!stopped)
+      }
     } catch {}
     setControlling(false)
   }, [setAndCacheRunning])
@@ -147,7 +152,7 @@ export default function TradingAgentPage() {
     if (tradeFilter === 'wins') return profit > 0
     if (tradeFilter === 'losses') return profit < 0
     if (tradeFilter === 'today') {
-      const today = new Date().toISOString().slice(0, 10)
+      const today = new Date().toISOString().slice(0, 10).replace(/-/g, '.')
       return t.close_time?.slice(0, 10) === today
     }
     return true
@@ -165,12 +170,16 @@ export default function TradingAgentPage() {
         {/* Agent start/stop */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 16px', borderRadius: 12, background: 'var(--panel)', border: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <div style={{ width: 8, height: 8, borderRadius: '50%', background: agentRunning ? '#22c55e' : '#94a3b8', boxShadow: agentRunning ? '0 0 6px #22c55e80' : 'none', flexShrink: 0 }} />
-            <span style={{ fontSize: 12, fontWeight: 700, color: agentRunning ? '#16a34a' : 'var(--muted)', fontFamily: 'Raleway' }}>
-              Trading Agent · {agentRunning ? 'Running' : 'Stopped'}
+            <div style={{
+              width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+              background: agentRunning === null ? '#eab308' : agentRunning ? '#22c55e' : '#94a3b8',
+              boxShadow: agentRunning ? '0 0 6px #22c55e80' : agentRunning === null ? '0 0 6px #eab30880' : 'none',
+            }} />
+            <span style={{ fontSize: 12, fontWeight: 700, fontFamily: 'Raleway', color: agentRunning === null ? '#92400e' : agentRunning ? '#16a34a' : 'var(--muted)' }}>
+              Trading Agent · {agentRunning === null ? 'Checking…' : agentRunning ? 'Running' : 'Stopped'}
             </span>
           </div>
-          {agentRunning ? (
+          {agentRunning === null ? null : agentRunning ? (
             <button onClick={() => controlAgent('stop')} disabled={controlling} style={{
               display: 'flex', alignItems: 'center', gap: 5, padding: '6px 14px', borderRadius: 8,
               background: '#ef444415', border: '1px solid #ef444440', color: '#dc2626',
@@ -308,7 +317,7 @@ export default function TradingAgentPage() {
   const commandCenter = summary ? (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {[
-        { label: 'Agent', value: agentRunning ? 'Running' : 'Stopped', color: agentRunning ? '#22c55e' : '#94a3b8' },
+        { label: 'Agent', value: agentRunning === null ? 'Checking…' : agentRunning ? 'Running' : 'Stopped', color: agentRunning ? '#22c55e' : '#94a3b8' },
         { label: 'Total P&L', value: `$${(summary.total_pnl).toFixed(2)}`, color: summary.total_pnl >= 0 ? '#22c55e' : '#ef4444' },
         { label: 'Win Rate', value: `${summary.win_rate.toFixed(1)}%`, color: summary.win_rate >= 50 ? '#22c55e' : '#ef4444' },
         { label: 'Open', value: `${summary.open_positions} positions`, color: 'var(--text)' },
@@ -329,7 +338,7 @@ export default function TradingAgentPage() {
           {[
             { label: 'Data source', value: 'trades.csv (MT5 export)', readonly: true },
             { label: 'Risk state', value: 'risk_state.json', readonly: true },
-            { label: 'Mode', value: agentRunning ? 'Live — receiving EA signals' : 'Stopped — analytics only', readonly: true },
+            { label: 'Mode', value: agentRunning === null ? 'Checking…' : agentRunning ? 'Live — receiving EA signals' : 'Stopped — analytics only', readonly: true },
             { label: 'Cascade', value: 'Runs nightly at 21:00 via cron', readonly: true },
           ].map(s => (
             <div key={s.label} style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0', borderBottom: '1px solid var(--faint)' }}>

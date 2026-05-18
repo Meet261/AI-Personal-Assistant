@@ -1,6 +1,6 @@
 FROM deepseek-r1:7b
 
-PARAMETER num_ctx 32768
+PARAMETER num_ctx 8192
 PARAMETER temperature 0.65
 PARAMETER repeat_penalty 1.05
 PARAMETER num_predict -1

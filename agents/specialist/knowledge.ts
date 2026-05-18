@@ -146,29 +146,95 @@ async function _executeKnowledgeAction(action: string, params: Record<string, un
       const topK  = (params.top_k as number) ?? 5
       if (!query) return { ok: false, message: 'query param required' }
 
+      // ── 1. Vector search via ChromaDB ─────────────────────────────────────
       const colId = await getOrCreateCollection()
       const queryEmbed = await embed(query)
-      const result = await chromaQuery(colId, queryEmbed, topK)
+      const vectorResult = await chromaQuery(colId, queryEmbed, topK * 2)
 
-      const docs: { text: string; meta: Record<string, string>; distance: number }[] = []
-      const documents  = result.documents?.[0]  ?? []
-      const metadatas  = result.metadatas?.[0]  ?? []
-      const distances  = result.distances?.[0]  ?? []
+      const vectorHits: Map<string, { title: string; authors: string; year: string; snippet: string; vectorRank: number }> = new Map()
+      const docs = vectorResult.documents?.[0] ?? []
+      const metas = vectorResult.metadatas?.[0] ?? []
+      docs.forEach((text: string, i: number) => {
+        const meta = metas[i] ?? {}
+        const pid = meta.paper_id ?? `v${i}`
+        vectorHits.set(pid, {
+          title: meta.title ?? 'Unknown',
+          authors: meta.authors ?? '',
+          year: meta.year ?? '',
+          snippet: (text ?? '').slice(0, 300),
+          vectorRank: i + 1,
+        })
+      })
 
-      for (let i = 0; i < documents.length; i++) {
-        docs.push({ text: documents[i], meta: metadatas[i] ?? {}, distance: distances[i] ?? 1 })
+      // ── 2. Keyword search via Supabase (FTS if index exists, ilike fallback) ─
+      const keywordHits: Map<string, { title: string; authors: string; year: string; keywordRank: number }> = new Map()
+      try {
+        // Try full-text search first (requires migration 005_fts_index.sql to be applied)
+        const { data: ftsData, error: ftsError } = await supabase
+          .from('research_papers')
+          .select('id,title,authors,year')
+          .textSearch('fts', query, { type: 'websearch', config: 'english' })
+          .limit(topK * 2)
+
+        if (!ftsError && ftsData?.length) {
+          ftsData.forEach((p, i) => {
+            keywordHits.set(p.id, { title: p.title, authors: p.authors ?? '', year: String(p.year ?? ''), keywordRank: i + 1 })
+          })
+        } else {
+          // Fallback: ilike multi-term search across title + authors + tags
+          const terms = query.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 4)
+          const { data: ilikeData } = await supabase
+            .from('research_papers')
+            .select('id,title,authors,year,tags,abstract')
+            .limit(100)
+
+          type PaperRow = { id: string; title: string; authors: string; year: number; tags: string[]; abstract: string | null }
+          const scored = (ilikeData as PaperRow[] ?? []).map(p => {
+            const text = `${p.title} ${p.authors} ${(p.tags ?? []).join(' ')} ${p.abstract ?? ''}`.toLowerCase()
+            const score = terms.reduce((s, t) => s + (text.split(t).length - 1), 0)
+            return { ...p, score }
+          }).filter(p => p.score > 0).sort((a, b) => b.score - a.score).slice(0, topK * 2)
+
+          scored.forEach((p, i) => {
+            keywordHits.set(p.id, { title: p.title, authors: p.authors ?? '', year: String(p.year ?? ''), keywordRank: i + 1 })
+          })
+        }
+      } catch { /* keyword search optional — vector search is sufficient fallback */ }
+
+      // ── 3. Reciprocal Rank Fusion (RRF) ───────────────────────────────────
+      // RRF score = 1/(k+rank_vector) + 1/(k+rank_keyword) where k=60
+      const K = 60
+      const allIds = new Set([...vectorHits.keys(), ...keywordHits.keys()])
+      const merged: { id: string; rrfScore: number; title: string; authors: string; year: string; snippet: string }[] = []
+
+      for (const id of allIds) {
+        const v = vectorHits.get(id)
+        const kw = keywordHits.get(id)
+        const vScore = v ? 1 / (K + v.vectorRank) : 0
+        const kwScore = kw ? 1 / (K + kw.keywordRank) : 0
+        merged.push({
+          id,
+          rrfScore: vScore + kwScore,
+          title: v?.title ?? kw?.title ?? 'Unknown',
+          authors: v?.authors ?? kw?.authors ?? '',
+          year: v?.year ?? kw?.year ?? '',
+          snippet: v?.snippet ?? '',
+        })
       }
+
+      merged.sort((a, b) => b.rrfScore - a.rrfScore)
+      const top = merged.slice(0, topK)
 
       return {
         ok: true,
-        message: `${docs.length} results for: "${query}"`,
-        data: docs.map(d => ({
-          title:    d.meta.title ?? 'Unknown',
-          authors:  d.meta.authors ?? '',
-          year:     d.meta.year ?? '',
-          paper_id: d.meta.paper_id ?? '',
-          snippet:  d.text.slice(0, 300),
-          score:    Math.round((1 - d.distance) * 100),
+        message: `${top.length} results for: "${query}" (hybrid: vector + keyword)`,
+        data: top.map((d, i) => ({
+          title:    d.title,
+          authors:  d.authors,
+          year:     d.year,
+          paper_id: d.id,
+          snippet:  d.snippet,
+          score:    Math.round((1 - i / top.length) * 100), // normalized rank score
         })),
       }
     }
