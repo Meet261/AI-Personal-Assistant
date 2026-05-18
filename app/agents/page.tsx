@@ -1,469 +1,273 @@
 'use client'
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import {
-  Bot, BookOpen, TrendingUp, ExternalLink, Play, Square,
-  RefreshCw, Terminal, CheckCircle2, XCircle, Loader2, ChevronDown, RotateCcw, Hammer,
+  TrendingUp, BookOpen, Calendar, Brain, Microscope,
+  Search, Mail, Bot, Flame, ChevronRight, Activity,
+  Zap, AlertTriangle, CheckCircle2, Play, Square,
 } from 'lucide-react'
 
 const S = { fontFamily: 'Raleway, sans-serif' }
 
-interface AgentStatus {
-  running: boolean
-  url: string
-  port: number
-  managedByPA: boolean
-  startedAt: string | null
-  logs: string[]
-}
-
-interface AgentConfig {
+interface AgentDef {
   id: string
-  label: string
-  description: string
-  icon: React.ElementType
+  name: string
+  shortDesc: string
   color: string
-  url: string
-  note: string
-  alwaysOn?: boolean
+  icon: React.ElementType
+  route: string
+  external?: boolean
+  tags: string[]
 }
 
-const AGENTS: AgentConfig[] = [
-  {
-    id: 'assistant',
-    label: 'Personal Assistant',
-    description: 'Task management, projects, journaling & AI agent chat.',
-    icon: Bot,
-    color: '#0F766E',
-    url: 'http://localhost:3000',
-    note: 'This app — always running.',
-    alwaysOn: true,
-  },
-  {
-    id: 'research',
-    label: 'Research Assistant',
-    description: 'Academic paper library, highlights, and research project management.',
-    icon: BookOpen,
-    color: '#7C3AED',
-    url: '/api/research-app',
-    note: 'Served by PA · data in Supabase · PDFs from dist/',
-  },
-  {
-    id: 'trading',
-    label: 'Trading Agent',
-    description: 'Live trading signals for XAUUSD/XAGUSD via MT5. FastAPI on port 8000.',
-    icon: TrendingUp,
-    color: '#B45309',
-    url: 'http://localhost:8000',
-    note: 'Python · uvicorn · port 8000',
-  },
+const AGENTS: AgentDef[] = [
+  { id: 'assistant',  name: 'Personal Assistant', shortDesc: 'Tasks, projects & meetings',   color: '#0F766E', icon: Bot,        route: '/agent',            tags: ['tasks','projects','meetings'] },
+  { id: 'trading',    name: 'Trading Agent',      shortDesc: 'P&L, risk & trade history',    color: '#B45309', icon: TrendingUp, route: '/agents/trading',   tags: ['pnl','risk','signals'] },
+  { id: 'journal',    name: 'Journal & Health',   shortDesc: 'Mood, energy & health logs',   color: '#0369A1', icon: Activity,   route: '/agents/journal',   tags: ['mood','energy','health'] },
+  { id: 'scheduler',  name: 'Scheduler',          shortDesc: 'Week view & smart planning',   color: '#6D28D9', icon: Calendar,   route: '/agents/scheduler', tags: ['week','overdue','alerts'] },
+  { id: 'memory',     name: 'Memory & Code',      shortDesc: 'Facts, prefs & code debug',    color: '#374151', icon: Brain,      route: '/agents/memory',    tags: ['facts','preferences','debug'] },
+  { id: 'digester',   name: 'Paper Digester',     shortDesc: 'AI analysis of your papers',   color: '#9D174D', icon: Microscope, route: '/agents/digester',  tags: ['haiku','digest','papers'] },
+  { id: 'knowledge',  name: 'Knowledge (RAG)',    shortDesc: 'Semantic search your library', color: '#1D4ED8', icon: Search,     route: '/agents/knowledge', tags: ['rag','search','citations'] },
+  { id: 'habits',     name: 'Habit Tracker',      shortDesc: 'Streaks & daily consistency',  color: '#065F46', icon: Flame,      route: '/agents/habit-tracker', tags: ['streaks','routines'] },
+  { id: 'email',      name: 'Email Agent',        shortDesc: 'Inbox triage & drafts',        color: '#DC2626', icon: Mail,       route: '/agents/email',     tags: ['inbox','triage','drafts'] },
+  { id: 'research',   name: 'Research Assistant', shortDesc: 'Paper library & highlights',   color: '#7C3AED', icon: BookOpen,   route: '/agents/research',  tags: ['papers','highlights','pdf'] },
 ]
 
-function timeAgo(iso: string) {
-  const diff = Date.now() - new Date(iso).getTime()
-  const m = Math.floor(diff / 60000)
-  if (m < 1) return 'just now'
-  if (m < 60) return `${m}m ago`
-  return `${Math.floor(m / 60)}h ago`
+interface SysStatus {
+  ollama: boolean | null
+  chroma: boolean | null
+  papers: number
+  tasks: number
+  habits: number
+  alerts: number
 }
 
-function AgentCard({ agent, status, onAction, actionLoading, onReconcile, reconciling, onImport, building, onBuild }: {
-  agent: AgentConfig
-  status: AgentStatus | null
-  onAction: (agentId: string, action: 'start' | 'stop') => void
-  actionLoading: boolean
-  onReconcile?: () => void
-  reconciling?: boolean
-  onImport?: (file: File) => void
-  building?: boolean
-  onBuild?: () => void
-}) {
-  const [showLogs, setShowLogs] = useState(false)
-  const logRef = useRef<HTMLDivElement>(null)
-  const fileRef = useRef<HTMLInputElement>(null)
-  const Icon = agent.icon
+// Agents that have controllable processes
+const CONTROLLABLE = ['trading', 'research']
 
-  const running = agent.alwaysOn ? true : (status?.running ?? false)
-  const managed = status?.managedByPA ?? false
+export default function AgentsHubPage() {
+  const router = useRouter()
+  const [sys, setSys] = useState<SysStatus>({ ollama: null, chroma: null, papers: 0, tasks: 0, habits: 0, alerts: 0 })
+  const [filter, setFilter] = useState('')
+  const [agentStatus, setAgentStatus] = useState<Record<string, boolean>>({})
+  const [controlling, setControlling] = useState<string | null>(null)
+
+  const loadStatus = useCallback(async () => {
+    const res = await fetch('/api/agents/launch').then(r => r.json()).catch(() => ({}))
+    const map: Record<string, boolean> = {}
+    for (const [id, val] of Object.entries(res)) {
+      map[id] = (val as { running: boolean }).running ?? false
+    }
+    setAgentStatus(map)
+  }, [])
 
   useEffect(() => {
-    if (showLogs && logRef.current) {
-      logRef.current.scrollTop = logRef.current.scrollHeight
-    }
-  }, [status?.logs, showLogs])
+    Promise.allSettled([
+      fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(2000) }).then(r => r.ok),
+      fetch('/api/knowledge?action=status').then(r => r.json()).then(d => d.ok),
+      fetch('/api/research/papers').then(r => r.json()).then(d => d.length),
+      fetch('/api/tasks').then(r => r.json()).then(d => d.length),
+      fetch('/api/agents/habit?action=get_habits').then(r => r.json()).then(d => d.data?.length ?? 0),
+      fetch('/api/agents/scheduler?action=get_alerts').then(r => r.json()).then(d => d.data?.length ?? 0),
+    ]).then(([ollama, chroma, papers, tasks, habits, alerts]) => setSys({
+      ollama:  ollama.status  === 'fulfilled' ? ollama.value  as boolean : false,
+      chroma:  chroma.status  === 'fulfilled' ? chroma.value  as boolean : false,
+      papers:  papers.status  === 'fulfilled' ? papers.value  as number  : 0,
+      tasks:   tasks.status   === 'fulfilled' ? tasks.value   as number  : 0,
+      habits:  habits.status  === 'fulfilled' ? habits.value  as number  : 0,
+      alerts:  alerts.status  === 'fulfilled' ? alerts.value  as number  : 0,
+    }))
+    loadStatus()
+  }, [loadStatus])
+
+  const controlAgent = useCallback(async (agentId: string, action: 'start' | 'stop', e: React.MouseEvent) => {
+    e.stopPropagation()
+    setControlling(agentId)
+    await fetch('/api/agents/launch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agent: agentId, action }),
+    })
+    await loadStatus()
+    setControlling(null)
+  }, [loadStatus])
+
+  const filtered = AGENTS.filter(a =>
+    !filter || a.name.toLowerCase().includes(filter.toLowerCase()) ||
+    a.tags.some(t => t.includes(filter.toLowerCase()))
+  )
+
+  function go(agent: AgentDef) {
+    agent.external ? window.open(agent.route, '_blank') : router.push(agent.route)
+  }
+
+  const Dot = ({ ok }: { ok: boolean | null }) => (
+    <div style={{ width: 7, height: 7, borderRadius: '50%', background: ok === null ? '#94a3b8' : ok ? '#22c55e' : '#ef4444', flexShrink: 0 }} />
+  )
 
   return (
-    <div style={{
-      background: 'var(--panel)',
-      border: `1px solid ${running ? `${agent.color}40` : 'var(--border)'}`,
-      borderRadius: 'var(--r-lg)',
-      overflow: 'hidden',
-      transition: 'border-color .2s',
-    }}>
-      {/* Card header */}
-      <div style={{ padding: '20px 20px 16px', display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-        {/* Icon */}
-        <div style={{
-          width: 44, height: 44, borderRadius: 14, flexShrink: 0,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: `${agent.color}18`, border: `1px solid ${agent.color}40`,
-        }}>
-          <Icon size={20} style={{ color: agent.color }} />
-        </div>
+    <div style={{ minHeight: '100vh', background: 'var(--bg)', ...S }}>
 
-        {/* Info */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-            <p style={{ ...S, fontWeight: 800, fontSize: 15, color: 'var(--text)', margin: 0 }}>
-              {agent.label}
-            </p>
-            {/* Status pill */}
-            <span style={{
-              display: 'flex', alignItems: 'center', gap: 4,
-              padding: '2px 8px', borderRadius: 20, fontSize: 10, fontWeight: 700, fontFamily: 'Raleway, sans-serif',
-              background: running ? 'rgba(39,217,138,.12)' : 'rgba(148,163,184,.10)',
-              color: running ? '#27d98a' : 'var(--muted)',
-              border: `1px solid ${running ? 'rgba(39,217,138,.25)' : 'var(--border)'}`,
-            }}>
-              <span style={{ width: 5, height: 5, borderRadius: '50%', background: running ? '#27d98a' : 'var(--muted)', display: 'inline-block' }} />
-              {running ? 'Running' : 'Stopped'}
-            </span>
-            {managed && (
-              <span style={{ fontSize: 9, color: agent.color, fontWeight: 700, fontFamily: 'Raleway, sans-serif', background: `${agent.color}14`, padding: '2px 6px', borderRadius: 8 }}>
-                PA managed
-              </span>
-            )}
+      {/* Header */}
+      <div style={{ padding: '28px 32px 0', background: 'var(--panel)', borderBottom: '1px solid var(--border)' }}>
+        <div style={{ maxWidth: 1100, margin: '0 auto' }}>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
+            <div>
+              <h1 style={{ margin: 0, fontSize: 24, fontWeight: 900, color: 'var(--text)', letterSpacing: '-0.03em' }}>Agent Hub</h1>
+              <p style={{ margin: '5px 0 0', fontSize: 13, color: 'var(--muted)', fontFamily: 'Lato' }}>
+                10 specialist agents · all running locally on DeepSeek R1 7b
+              </p>
+            </div>
+            {/* Status pills */}
+            <div style={{ display: 'flex', gap: 8 }}>
+              {[{ label: 'Ollama', ok: sys.ollama }, { label: 'ChromaDB', ok: sys.chroma }, { label: 'Server', ok: true as boolean }].map(s => (
+                <div key={s.label} style={{
+                  display: 'flex', alignItems: 'center', gap: 6, padding: '5px 11px',
+                  borderRadius: 8, border: '1px solid var(--border)', background: 'var(--faint)',
+                }}>
+                  <Dot ok={s.ok as boolean | null} />
+                  <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)' }}>{s.label}</span>
+                </div>
+              ))}
+            </div>
           </div>
-          <p style={{ fontSize: 12, color: 'var(--muted)', margin: '0 0 4px', lineHeight: 1.5, fontFamily: 'Lato, sans-serif' }}>
-            {agent.description}
-          </p>
-          <p style={{ fontSize: 11, color: 'var(--subtle)', margin: 0, fontFamily: 'Lato, sans-serif' }}>
-            {agent.note}
-            {status?.startedAt && running && managed && ` · started ${timeAgo(status.startedAt)}`}
-          </p>
-        </div>
-      </div>
 
-      {/* Actions */}
-      <div style={{ padding: '0 20px 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
-        {!agent.alwaysOn && (
-          <>
-            {running ? (
-              <button
-                onClick={() => onAction(agent.id, 'stop')}
-                disabled={actionLoading}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '7px 14px', borderRadius: 10, border: 'none', cursor: actionLoading ? 'not-allowed' : 'pointer',
-                  background: 'rgba(255,92,122,.12)', color: '#ff5c7a',
-                  fontFamily: 'Raleway, sans-serif', fontWeight: 700, fontSize: 12,
-                  opacity: actionLoading ? 0.6 : 1, transition: 'opacity .15s',
-                }}
-              >
-                {actionLoading ? <Loader2 size={13} style={{ animation: 'spin .8s linear infinite' }} /> : <Square size={13} />}
-                Stop
-              </button>
-            ) : (
-              <button
-                onClick={() => onAction(agent.id, 'start')}
-                disabled={actionLoading}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 6,
-                  padding: '7px 14px', borderRadius: 10, border: 'none', cursor: actionLoading ? 'not-allowed' : 'pointer',
-                  background: agent.color, color: '#fff',
-                  fontFamily: 'Raleway, sans-serif', fontWeight: 700, fontSize: 12,
-                  opacity: actionLoading ? 0.6 : 1, transition: 'opacity .15s',
-                }}
-              >
-                {actionLoading ? <Loader2 size={13} style={{ animation: 'spin .8s linear infinite' }} /> : <Play size={13} />}
-                Start
-              </button>
-            )}
-          </>
-        )}
-
-        {agent.id === 'research' && (
-          <button
-            onClick={building ? undefined : onBuild}
-            disabled={building}
-            title="Rebuild the research app from source (after adding new papers or code changes)"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '7px 14px', borderRadius: 10, border: '1px solid var(--border)',
-              background: 'var(--faint)', color: 'var(--text)', cursor: building ? 'not-allowed' : 'pointer',
-              fontFamily: 'Raleway, sans-serif', fontWeight: 700, fontSize: 12,
-              opacity: building ? 0.6 : 1,
-            }}
-          >
-            {building ? <Loader2 size={13} style={{ animation: 'spin .8s linear infinite' }} /> : <Hammer size={13} />}
-            {building ? 'Building…' : 'Rebuild'}
-          </button>
-        )}
-
-        {onImport && (
-          <>
-            <input ref={fileRef} type="file" accept=".csv,.htm,.html" className="hidden" style={{ display: 'none' }}
-              onChange={e => { const f = e.target.files?.[0]; if (f) { onImport(f); e.target.value = '' } }} />
-            <button
-              onClick={() => fileRef.current?.click()}
-              title="Import MT5 history CSV — File > Save As Report in MT5 History tab"
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6,
-                padding: '7px 14px', borderRadius: 10, border: '1px solid var(--border)',
-                background: 'var(--faint)', color: 'var(--text)', cursor: 'pointer',
-                fontFamily: 'Raleway, sans-serif', fontWeight: 700, fontSize: 12,
-              }}
-            >
-              <RefreshCw size={13} /> Import MT5
-            </button>
-          </>
-        )}
-
-        {onReconcile && (
-          <button
-            onClick={onReconcile}
-            disabled={reconciling || !running}
-            title="Sync any missed trades from MT5 into the trade log"
-            style={{
-              display: 'flex', alignItems: 'center', gap: 6,
-              padding: '7px 14px', borderRadius: 10, border: '1px solid var(--border)',
-              background: 'var(--faint)', color: 'var(--text)', cursor: reconciling || !running ? 'not-allowed' : 'pointer',
-              fontFamily: 'Raleway, sans-serif', fontWeight: 700, fontSize: 12,
-              opacity: !running ? 0.4 : reconciling ? 0.6 : 1,
-            }}
-          >
-            {reconciling ? <Loader2 size={13} style={{ animation: 'spin .8s linear infinite' }} /> : <RotateCcw size={13} />}
-            {reconciling ? 'Syncing…' : 'Sync Trades'}
-          </button>
-        )}
-
-        <a
-          href={agent.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '7px 14px', borderRadius: 10, textDecoration: 'none',
-            background: 'var(--faint)', border: '1px solid var(--border)',
-            color: running ? 'var(--text)' : 'var(--muted)',
-            fontFamily: 'Raleway, sans-serif', fontWeight: 700, fontSize: 12,
-            opacity: running ? 1 : 0.5, pointerEvents: running ? 'auto' : 'none',
-            transition: 'all .15s',
-          }}
-        >
-          <ExternalLink size={13} /> Open
-        </a>
-
-        {!agent.alwaysOn && status?.logs && status.logs.length > 0 && (
-          <button
-            onClick={() => setShowLogs(s => !s)}
-            style={{
-              display: 'flex', alignItems: 'center', gap: 5,
-              marginLeft: 'auto', padding: '7px 12px', borderRadius: 10,
-              background: 'var(--faint)', border: '1px solid var(--border)',
-              color: 'var(--muted)', cursor: 'pointer',
-              fontFamily: 'Raleway, sans-serif', fontWeight: 700, fontSize: 11,
-            }}
-          >
-            <Terminal size={12} /> Logs
-            <ChevronDown size={11} style={{ transform: showLogs ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
-          </button>
-        )}
-      </div>
-
-      {/* Log panel */}
-      {showLogs && status?.logs && (
-        <div style={{ borderTop: '1px solid var(--border)', background: 'var(--bg)' }}>
-          <div
-            ref={logRef}
-            style={{
-              height: 180, overflowY: 'auto', padding: '10px 14px',
-              fontFamily: 'monospace', fontSize: 11, color: '#a3e635',
-              lineHeight: 1.6,
-            }}
-          >
-            {status.logs.length === 0 ? (
-              <span style={{ color: 'var(--muted)' }}>No logs yet…</span>
-            ) : status.logs.map((line, i) => (
-              <div key={i} style={{ color: line.includes('error') || line.includes('Error') ? '#ff5c7a' : line.includes('warn') ? '#fbbf24' : '#a3e635' }}>
-                {line}
+          {/* Quick stats */}
+          <div style={{ display: 'flex', gap: 28, paddingBottom: 20 }}>
+            {[
+              { label: 'Open Tasks', val: sys.tasks,  icon: CheckCircle2, color: '#0F766E' },
+              { label: 'Papers',     val: sys.papers,  icon: BookOpen,     color: '#7C3AED' },
+              { label: 'Habits',     val: sys.habits,  icon: Flame,        color: '#065F46' },
+              { label: 'Alerts',     val: sys.alerts,  icon: AlertTriangle, color: sys.alerts ? '#B45309' : '#94a3b8' },
+            ].map(s => (
+              <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                <s.icon size={14} color={s.color} />
+                <span style={{ fontSize: 15, fontWeight: 900, color: 'var(--text)' }}>{s.val}</span>
+                <span style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'Lato' }}>{s.label}</span>
               </div>
             ))}
           </div>
         </div>
-      )}
-    </div>
-  )
-}
+      </div>
 
-export default function AgentsPage() {
-  const [statuses, setStatuses] = useState<Record<string, AgentStatus>>({})
-  const [loading, setLoading] = useState(true)
-  const [actionLoading, setActionLoading] = useState<string | null>(null)
-  const [actionResult, setActionResult] = useState<{ ok: boolean; message: string } | null>(null)
-  const [reconciling, setReconciling] = useState(false)
-  const [building, setBuilding] = useState(false)
+      <div style={{ maxWidth: 1100, margin: '0 auto', padding: '28px 32px' }}>
 
-  const fetchStatus = useCallback(async () => {
-    try {
-      const res = await fetch('/api/agents/launch')
-      const data = await res.json()
-      setStatuses(data)
-    } catch {}
-    setLoading(false)
-  }, [])
+        {/* Search */}
+        <input value={filter} onChange={e => setFilter(e.target.value)} placeholder="Search agents…"
+          style={{
+            padding: '9px 14px', borderRadius: 10, border: '1px solid var(--border)',
+            background: 'var(--panel)', color: 'var(--text)', fontSize: 13,
+            fontFamily: 'Lato', outline: 'none', width: 260, display: 'block', marginBottom: 20,
+          }}
+        />
 
-  useEffect(() => {
-    fetchStatus()
-    const interval = setInterval(fetchStatus, 5000)
-    return () => clearInterval(interval)
-  }, [fetchStatus])
+        {/* Agent cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14 }}>
+          {filtered.map(agent => {
+            const Icon = agent.icon
+            return (
+              <div key={agent.id} onClick={() => go(agent)} style={{
+                background: 'var(--panel)', borderRadius: 16, padding: '20px',
+                border: '1px solid var(--border)', cursor: 'pointer',
+                transition: 'all .15s', position: 'relative', overflow: 'hidden',
+              }}
+              onMouseEnter={e => {
+                e.currentTarget.style.borderColor = `${agent.color}60`
+                e.currentTarget.style.transform = 'translateY(-2px)'
+                e.currentTarget.style.boxShadow = `0 8px 24px ${agent.color}18`
+              }}
+              onMouseLeave={e => {
+                e.currentTarget.style.borderColor = 'var(--border)'
+                e.currentTarget.style.transform = 'none'
+                e.currentTarget.style.boxShadow = 'none'
+              }}>
+                {/* Color accent top strip */}
+                <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: agent.color, borderRadius: '16px 16px 0 0' }} />
 
-  async function handleBuild() {
-    setBuilding(true)
-    setActionResult(null)
-    try {
-      const res = await fetch('/api/agents/build', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ agent: 'research' }) })
-      const data = await res.json()
-      setActionResult({ ok: data.ok ?? true, message: data.message })
-      const poll = setInterval(async () => {
-        const r = await fetch('/api/agents/build')
-        const d = await r.json()
-        if (!d.building) { clearInterval(poll); setBuilding(false); setActionResult({ ok: true, message: 'Research app rebuilt successfully' }) }
-      }, 2000)
-    } catch (e) { setActionResult({ ok: false, message: String(e) }); setBuilding(false) }
-  }
+                <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14 }}>
+                  <div style={{
+                    width: 44, height: 44, borderRadius: 13, flexShrink: 0,
+                    background: `${agent.color}12`, border: `1.5px solid ${agent.color}28`,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  }}>
+                    <Icon size={20} color={agent.color} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <h3 style={{ margin: 0, fontSize: 14, fontWeight: 800, color: 'var(--text)' }}>{agent.name}</h3>
+                      <ChevronRight size={14} color="var(--muted)" />
+                    </div>
+                    <p style={{ margin: '3px 0 10px', fontSize: 12, color: 'var(--muted)', fontFamily: 'Lato', lineHeight: 1.4 }}>
+                      {agent.shortDesc}
+                    </p>
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <div style={{ display: 'flex', gap: 5, flexWrap: 'wrap' }}>
+                        {agent.tags.slice(0, 3).map(t => (
+                          <span key={t} style={{
+                            padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700,
+                            background: `${agent.color}10`, color: agent.color, border: `1px solid ${agent.color}20`,
+                          }}>{t}</span>
+                        ))}
+                        {agent.external && <span style={{ padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700, background: 'var(--faint)', color: 'var(--muted)' }}>↗ external</span>}
+                      </div>
+                      {CONTROLLABLE.includes(agent.id) && (() => {
+                        const running = agentStatus[agent.id] ?? false
+                        const busy = controlling === agent.id
+                        return (
+                          <button
+                            onClick={e => controlAgent(agent.id, running ? 'stop' : 'start', e)}
+                            disabled={busy}
+                            style={{
+                              display: 'flex', alignItems: 'center', gap: 4,
+                              padding: '4px 10px', borderRadius: 7, fontSize: 10, fontWeight: 700,
+                              fontFamily: 'Raleway', cursor: busy ? 'wait' : 'pointer',
+                              border: `1px solid ${running ? '#22c55e40' : agent.color + '40'}`,
+                              background: running ? '#22c55e10' : `${agent.color}10`,
+                              color: running ? '#16a34a' : agent.color,
+                              opacity: busy ? 0.6 : 1, flexShrink: 0,
+                            }}>
+                            <div style={{ width: 5, height: 5, borderRadius: '50%', background: running ? '#22c55e' : '#94a3b8', flexShrink: 0 }} />
+                            {busy ? '…' : running ? 'Stop' : 'Start'}
+                          </button>
+                        )
+                      })()}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
 
-  async function handleImport(file: File) {
-    setActionResult(null)
-    const formData = new FormData()
-    formData.append('file', file)
-    try {
-      const res = await fetch('/api/agents/import-trades', { method: 'POST', body: formData })
-      const data = await res.json()
-      setActionResult({ ok: data.ok ?? !data.error, message: data.message || data.error })
-    } catch (e) {
-      setActionResult({ ok: false, message: String(e) })
-    }
-  }
-
-  async function handleReconcile() {
-    setReconciling(true)
-    setActionResult(null)
-    try {
-      const res = await fetch('/api/agents/reconcile', { method: 'POST' })
-      const data = await res.json()
-      setActionResult({ ok: !data.error, message: data.message || data.error })
-    } catch (e) {
-      setActionResult({ ok: false, message: String(e) })
-    } finally {
-      setReconciling(false)
-    }
-  }
-
-  async function handleAction(agentId: string, action: 'start' | 'stop') {
-    setActionLoading(agentId)
-    setActionResult(null)
-    try {
-      const res = await fetch('/api/agents/launch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ agent: agentId, action }),
-      })
-      const data = await res.json()
-      setActionResult({ ok: data.ok ?? !data.error, message: data.message || data.error })
-      // Optimistically update status for stop actions
-      if (action === 'stop' && (data.ok ?? !data.error)) {
-        setStatuses(prev => ({
-          ...prev,
-          [agentId]: { ...prev[agentId], running: false, managedByPA: false },
-        }))
-      }
-      // Re-poll to confirm actual state
-      setTimeout(fetchStatus, 1500)
-      setTimeout(fetchStatus, 4000)
-    } catch (e) {
-      setActionResult({ ok: false, message: String(e) })
-    } finally {
-      setActionLoading(null)
-    }
-  }
-
-  const runningCount = Object.values(statuses).filter(s => s.running).length + 1 // +1 for PA itself
-
-  return (
-    <div style={{ padding: '28px 32px', maxWidth: 860, margin: '0 auto' }}>
-      {/* Header */}
-      <div style={{ marginBottom: 28 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
-            <h1 style={{ ...S, fontSize: 22, fontWeight: 900, color: 'var(--text)', margin: '0 0 4px' }}>
-              Agents Hub
-            </h1>
-            <p style={{ fontSize: 13, color: 'var(--muted)', margin: 0, fontFamily: 'Lato, sans-serif' }}>
-              Manage and launch your AI agents from one place.
-            </p>
+        {/* Daily loop */}
+        <div style={{ marginTop: 28, padding: 20, borderRadius: 16, border: '1px solid var(--border)', background: 'var(--panel)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+            <Zap size={15} color="#B45309" />
+            <span style={{ fontWeight: 800, fontSize: 14, color: 'var(--text)' }}>Daily Loop</span>
+            <span style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'Lato' }}>— your morning → work → evening workflow</span>
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 12px', borderRadius: 10, background: 'var(--faint)', border: '1px solid var(--border)' }}>
-              <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#27d98a', boxShadow: '0 0 6px #27d98a80', display: 'inline-block' }} />
-              <span style={{ ...S, fontWeight: 700, fontSize: 12, color: 'var(--text)' }}>
-                {loading ? '…' : runningCount} / {AGENTS.length} running
-              </span>
-            </div>
-            <button
-              onClick={fetchStatus}
-              style={{ padding: '7px', borderRadius: 10, background: 'var(--faint)', border: '1px solid var(--border)', cursor: 'pointer', color: 'var(--muted)', display: 'flex', alignItems: 'center' }}
-              title="Refresh status"
-            >
-              <RefreshCw size={14} />
-            </button>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {[
+              { label: '☀️ Morning Brief',   route: '/briefing/morning',      color: '#B45309' },
+              { label: '📋 Plan Today',       route: '/agent',                 color: '#0F766E' },
+              { label: '📓 Journal',          route: '/agents/journal',        color: '#0369A1' },
+              { label: '🔥 Habits',           route: '/agents/habit-tracker',  color: '#065F46' },
+              { label: '📈 Trading',          route: '/agents/trading',        color: '#B45309' },
+              { label: '🌙 Evening Summary',  route: '/briefing/evening',      color: '#6D28D9' },
+            ].map(item => (
+              <button key={item.label} onClick={() => router.push(item.route)} style={{
+                padding: '8px 14px', borderRadius: 10, border: `1px solid ${item.color}30`,
+                background: `${item.color}08`, color: item.color, fontFamily: 'Raleway',
+                fontWeight: 700, fontSize: 12, cursor: 'pointer', transition: 'background .1s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = `${item.color}18`}
+              onMouseLeave={e => e.currentTarget.style.background = `${item.color}08`}>
+                {item.label}
+              </button>
+            ))}
           </div>
         </div>
       </div>
-
-      {/* Action result toast */}
-      {actionResult && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 10,
-          padding: '10px 16px', borderRadius: 12, marginBottom: 20,
-          background: actionResult.ok ? 'rgba(39,217,138,.10)' : 'rgba(255,92,122,.10)',
-          border: `1px solid ${actionResult.ok ? 'rgba(39,217,138,.25)' : 'rgba(255,92,122,.25)'}`,
-        }}>
-          {actionResult.ok
-            ? <CheckCircle2 size={16} style={{ color: '#27d98a', flexShrink: 0 }} />
-            : <XCircle size={16} style={{ color: '#ff5c7a', flexShrink: 0 }} />}
-          <p style={{ fontSize: 13, color: 'var(--text)', margin: 0, fontFamily: 'Lato, sans-serif' }}>
-            {actionResult.message}
-          </p>
-          <button onClick={() => setActionResult(null)} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', fontSize: 16, lineHeight: 1 }}>×</button>
-        </div>
-      )}
-
-      {/* Agent cards */}
-      {loading ? (
-        <div style={{ display: 'flex', justifyContent: 'center', padding: 60 }}>
-          <Loader2 size={24} style={{ color: 'var(--brand2)', animation: 'spin .8s linear infinite' }} />
-        </div>
-      ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          {AGENTS.map(agent => (
-            <AgentCard
-              key={agent.id}
-              agent={agent}
-              status={agent.alwaysOn ? { running: true, url: agent.url, port: 3000, managedByPA: true, startedAt: null, logs: [] } : (statuses[agent.id] ?? null)}
-              onAction={handleAction}
-              actionLoading={actionLoading === agent.id}
-              onReconcile={agent.id === 'trading' ? handleReconcile : undefined}
-              reconciling={agent.id === 'trading' ? reconciling : false}
-              onImport={agent.id === 'trading' ? handleImport : undefined}
-              building={agent.id === 'research' ? building : false}
-              onBuild={agent.id === 'research' ? handleBuild : undefined}
-            />
-          ))}
-        </div>
-      )}
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   )
 }

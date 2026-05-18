@@ -4,8 +4,8 @@ import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
 import {
   LayoutDashboard, FolderKanban, CheckSquare,
-  BookOpen, MessageSquare, Sunrise, Moon, Bot,
-  Leaf, Command, Timer, Layers, Flame,
+  BookOpen, Sunrise, Moon,
+  Leaf, Command, Timer, Layers, Flame, Activity,
 } from 'lucide-react'
 import { useCmdK } from './CmdKProvider'
 
@@ -14,13 +14,12 @@ const nav = [
   { href: '/projects',         label: 'Projects',       icon: FolderKanban },
   { href: '/tasks',            label: 'Tasks',          icon: CheckSquare },
   { href: '/journal',          label: 'Journal',        icon: BookOpen },
-  { href: '/checkin',          label: 'Daily Review',   icon: MessageSquare },
-  { href: '/briefing/morning', label: 'Morning Brief',  icon: Sunrise },
-  { href: '/briefing/evening', label: 'Evening Summary',icon: Moon },
-  { href: '/agent',            label: 'AI Agent',       icon: Bot },
-  { href: '/agents',           label: 'Agents Hub',     icon: Layers },
-  { href: '/habits',           label: 'Habits',         icon: Flame },
-  { href: '/timer',            label: 'Work Timer',     icon: Timer },
+  { href: '/briefing/morning',     label: 'Morning Brief',  icon: Sunrise },
+  { href: '/briefing/evening',     label: 'Evening Summary',icon: Moon },
+  { href: '/agents',               label: 'Agents Hub',     icon: Layers },
+  { href: '/agents/habit-tracker', label: 'Habits',         icon: Flame },
+  { href: '/agents/trace',         label: 'Routing Trace',  icon: Activity },
+  { href: '/timer',                label: 'Work Timer',     icon: Timer },
 ]
 
 type Theme = 'nordic' | 'midnight' | 'calm' | 'paper'

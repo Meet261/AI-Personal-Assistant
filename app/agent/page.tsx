@@ -53,6 +53,115 @@ const AGENT_ICONS: Record<AgentId, React.ElementType> = {
 
 function uid() { return Math.random().toString(36).slice(2) }
 
+// Lightweight markdown renderer — handles bold, headers, bullets, code, hr
+function MarkdownText({ text, isUser }: { text: string; isUser: boolean }) {
+  if (!text) return null
+  const muted = isUser ? 'rgba(255,255,255,0.7)' : 'var(--muted)'
+  const base: React.CSSProperties = { fontSize: 13, lineHeight: 1.65, fontFamily: 'Lato, sans-serif', margin: 0 }
+
+  const lines = text.split('\n')
+  const elements: React.ReactNode[] = []
+  let i = 0
+
+  function renderInline(s: string): React.ReactNode {
+    // Bold **text** and *text*
+    const parts = s.split(/(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`)/g)
+    return parts.map((p, idx) => {
+      if (p.startsWith('**') && p.endsWith('**')) return <strong key={idx} style={{ fontWeight: 800 }}>{p.slice(2, -2)}</strong>
+      if (p.startsWith('*') && p.endsWith('*')) return <em key={idx}>{p.slice(1, -1)}</em>
+      if (p.startsWith('`') && p.endsWith('`')) return <code key={idx} style={{ fontFamily: 'monospace', fontSize: 12, background: isUser ? 'rgba(255,255,255,0.15)' : 'var(--faint)', padding: '1px 5px', borderRadius: 4 }}>{p.slice(1, -1)}</code>
+      return p
+    })
+  }
+
+  while (i < lines.length) {
+    const line = lines[i]
+
+    // Fenced code block
+    if (line.startsWith('```')) {
+      const lang = line.slice(3).trim()
+      const codeLines: string[] = []
+      i++
+      while (i < lines.length && !lines[i].startsWith('```')) { codeLines.push(lines[i]); i++ }
+      // Only render if it looks like actual code (not a tool block mistakenly not stripped)
+      if (lang !== 'tool') {
+        elements.push(
+          <pre key={i} style={{ margin: '8px 0', padding: '10px 12px', borderRadius: 8, background: isUser ? 'rgba(255,255,255,0.12)' : 'var(--faint)', fontSize: 11, fontFamily: 'monospace', overflowX: 'auto', whiteSpace: 'pre-wrap', border: isUser ? 'none' : '1px solid var(--border)' }}>
+            <code>{codeLines.join('\n')}</code>
+          </pre>
+        )
+      }
+      i++
+      continue
+    }
+
+    // Horizontal rule
+    if (/^---+$/.test(line.trim())) {
+      elements.push(<hr key={i} style={{ border: 'none', borderTop: `1px solid ${isUser ? 'rgba(255,255,255,0.2)' : 'var(--border)'}`, margin: '10px 0' }} />)
+      i++; continue
+    }
+
+    // Headings ### ## #
+    const hMatch = line.match(/^(#{1,3})\s+(.+)/)
+    if (hMatch) {
+      const level = hMatch[1].length
+      const sz = level === 1 ? 16 : level === 2 ? 14 : 13
+      elements.push(<div key={i} style={{ fontWeight: 800, fontSize: sz, margin: '10px 0 4px', fontFamily: 'Raleway, sans-serif', color: isUser ? '#fff' : 'var(--text)' }}>{renderInline(hMatch[2])}</div>)
+      i++; continue
+    }
+
+    // Bullet list item
+    const bulletMatch = line.match(/^[-*•]\s+(.+)/)
+    if (bulletMatch) {
+      const bulletItems: string[] = [bulletMatch[1]]
+      i++
+      while (i < lines.length && /^[-*•]\s+/.test(lines[i])) {
+        bulletItems.push(lines[i].replace(/^[-*•]\s+/, ''))
+        i++
+      }
+      elements.push(
+        <ul key={i} style={{ margin: '6px 0', paddingLeft: 18 }}>
+          {bulletItems.map((item, bi) => (
+            <li key={bi} style={{ ...base, marginBottom: 3, color: isUser ? '#fff' : 'var(--text)' }}>{renderInline(item)}</li>
+          ))}
+        </ul>
+      )
+      continue
+    }
+
+    // Numbered list
+    const numMatch = line.match(/^(\d+)\.\s+(.+)/)
+    if (numMatch) {
+      const numItems: string[] = [numMatch[2]]
+      i++
+      while (i < lines.length && /^\d+\.\s+/.test(lines[i])) {
+        numItems.push(lines[i].replace(/^\d+\.\s+/, ''))
+        i++
+      }
+      elements.push(
+        <ol key={i} style={{ margin: '6px 0', paddingLeft: 20 }}>
+          {numItems.map((item, ni) => (
+            <li key={ni} style={{ ...base, marginBottom: 4, color: isUser ? '#fff' : 'var(--text)' }}>{renderInline(item)}</li>
+          ))}
+        </ol>
+      )
+      continue
+    }
+
+    // Empty line — paragraph break
+    if (!line.trim()) {
+      elements.push(<div key={i} style={{ height: 6 }} />)
+      i++; continue
+    }
+
+    // Plain paragraph
+    elements.push(<p key={i} style={{ ...base, margin: '0 0 4px', color: isUser ? '#fff' : 'var(--text)' }}>{renderInline(line)}</p>)
+    i++
+  }
+
+  return <>{elements}</>
+}
+
 function timeAgo(iso: string) {
   const diff = Date.now() - new Date(iso).getTime()
   const m = Math.floor(diff / 60000)
@@ -185,11 +294,9 @@ export default function AgentPage() {
 
     try {
       // Use orchestrator for auto-routing, direct agent otherwise
-      const useOrchestrator = activeAgentId === 'assistant' // orchestrator routes from PA
-      const endpoint = useOrchestrator ? '/api/orchestrator' : '/api/ai/agent'
-      const body = useOrchestrator
-        ? { messages: history, model, session_id: sid }
-        : { messages: history, model, agentId: activeAgentId, session_id: sid }
+      // All agents route through orchestrator with forced agent routing
+      const endpoint = '/api/orchestrator'
+      const body = { messages: history, model, session_id: sid, agentId: activeAgentId }
 
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -400,9 +507,7 @@ export default function AgentPage() {
                         <span style={{ fontSize: 12, color: 'var(--muted)' }}>Thinking…</span>
                       </div>
                     ) : (
-                      <p style={{ fontSize: 13, lineHeight: 1.6, margin: 0, whiteSpace: 'pre-wrap', fontFamily: 'Lato, sans-serif' }}>
-                        {msg.content || (msg.toolResults?.length ? '' : '…')}
-                      </p>
+                      <MarkdownText text={msg.content || (msg.toolResults?.length ? '' : '…')} isUser={msg.role === 'user'} />
                     )}
                     <p style={{ fontSize: 10, opacity: 0.45, margin: '6px 0 0', fontFamily: 'Lato, sans-serif', textAlign: msg.role === 'user' ? 'right' : 'left' }}>
                       {msg.ts.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -506,9 +611,6 @@ export default function AgentPage() {
                         <div style={{ display: 'flex', gap: 10, marginTop: 6, alignItems: 'center' }}>
                           <span style={{ fontSize: 10, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 3 }}>
                             <Clock size={9} /> {timeAgo(s.last_message_at || s.started_at)}
-                          </span>
-                          <span style={{ fontSize: 10, color: 'var(--muted)', display: 'flex', alignItems: 'center', gap: 3 }}>
-                            <MessageSquare size={9} /> {s.message_count} messages
                           </span>
                         </div>
                       </div>
