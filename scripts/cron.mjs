@@ -20,7 +20,10 @@ try {
     const eq = trimmed.indexOf('=')
     if (eq === -1) continue
     const key = trimmed.slice(0, eq).trim()
-    const val = trimmed.slice(eq + 1).trim()
+    let val = trimmed.slice(eq + 1).trim()
+    // Strip surrounding quotes (single or double)
+    if ((val.startsWith('"') && val.endsWith('"')) || (val.startsWith("'") && val.endsWith("'")))
+      val = val.slice(1, -1)
     if (!(key in process.env)) process.env[key] = val
   }
 } catch { /* .env.local optional */ }
@@ -209,7 +212,22 @@ async function isServerUp() {
   } catch { return false }
 }
 
+async function alreadySentToday(type, date) {
+  // Check DB — if a briefing row exists for this date+type, we already sent it
+  try {
+    const res = await fetch(`${APP_URL}/api/briefing?date=${date}&type=${type}`)
+    if (!res.ok) return false
+    const data = await res.json()
+    return !!(data?.content)
+  } catch { return false }
+}
+
 async function runBriefing(type, date) {
+  // Idempotency guard — don't resend if already generated today (cron restart safety)
+  if (await alreadySentToday(type, date)) {
+    console.log(`[cron] ${type} briefing already sent for ${date} — skipping`)
+    return
+  }
   console.log(`[cron] Generating ${type} briefing for ${date}…`)
   try {
     const { content, top_priorities } = await streamBriefing(type, date)
@@ -225,19 +243,42 @@ async function runBriefing(type, date) {
   }
 }
 
-// ── Nightly scheduler cron (22:00) ──────────────────────────────────────────
+// ── Nightly scheduler + cascade (21:00) ─────────────────────────────────────
 async function runNightlyScheduler(date) {
   console.log(`[cron] Running nightly scheduler for ${date}…`)
-  const res = await fetch(`${APP_URL}/api/agents/scheduler`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ cron: true }),
-  })
-  const data = await res.json()
-  if (data.ok) {
-    console.log(`[cron] ✓ Nightly scheduler complete — pushed: ${(data.pushed ?? []).join(', ') || 'none'}`)
-  } else {
-    console.error(`[cron] Nightly scheduler error: ${data.message}`)
+
+  // 1. Scheduler: overdue tasks, due-tomorrow, journal patterns
+  try {
+    const res = await fetch(`${APP_URL}/api/agents/scheduler`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cron: true }),
+    })
+    const data = await res.json()
+    if (data.ok) {
+      console.log(`[cron] ✓ Scheduler complete — pushed: ${(data.pushed ?? []).join(', ') || 'none'}`)
+    } else {
+      console.error(`[cron] Scheduler error: ${data.message}`)
+    }
+  } catch (e) {
+    console.error(`[cron] Scheduler failed:`, e.message)
+  }
+
+  // 2. Cascade: trading → journal → scheduler chain
+  try {
+    console.log(`[cron] Running trading→journal→scheduler cascade…`)
+    const res = await fetch(`${APP_URL}/api/agents/cascade`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    })
+    const data = await res.json()
+    if (data.ok) {
+      console.log(`[cron] ✓ Cascade complete — outcome: ${data.tradingOutcome}, alerts: ${(data.alertsPushed ?? []).join(', ') || 'none'}`)
+    } else {
+      console.error(`[cron] Cascade error:`, data)
+    }
+  } catch (e) {
+    console.error(`[cron] Cascade failed:`, e.message)
   }
 }
 
@@ -262,7 +303,7 @@ console.log('[cron]   Evening summary:         first open after 18:00')
 console.log('[cron]   Nightly scheduler cron:  21:00 daily')
 console.log('[cron]   Weekly habit digest:     20:00 Sunday')
 
-scheduleWindow(6,  12, 'Morning Briefing',      date => runBriefing('morning', date))
-scheduleWindow(18, 24, 'Evening Summary',        date => runBriefing('evening', date))
-scheduleDaily(21,  0,  'Nightly Scheduler Cron', date => runNightlyScheduler(date))
-scheduleDaily(20,  0,  'Weekly Habit Digest',    date => runHabitDigest(date))
+scheduleWindow(6,  12, 'Morning Briefing',               date => runBriefing('morning', date))
+scheduleWindow(18, 24, 'Evening Summary',                date => runBriefing('evening', date))
+scheduleDaily(21,  0,  'Nightly Scheduler + Cascade',    date => runNightlyScheduler(date))
+scheduleDaily(20,  0,  'Weekly Habit Digest',            date => runHabitDigest(date))
