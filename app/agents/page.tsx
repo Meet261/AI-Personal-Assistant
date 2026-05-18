@@ -21,7 +21,7 @@ interface AgentDef {
 }
 
 const AGENTS: AgentDef[] = [
-  { id: 'assistant',  name: 'Personal Assistant', shortDesc: 'Tasks, projects & meetings',   color: '#0F766E', icon: Bot,        route: '/agent',            tags: ['tasks','projects','meetings'] },
+  { id: 'assistant',  name: 'Personal Assistant', shortDesc: 'Tasks, projects & meetings',   color: '#0F766E', icon: Bot,        route: '/agents/assistant', tags: ['tasks','projects','meetings'] },
   { id: 'trading',    name: 'Trading Agent',      shortDesc: 'P&L, risk & trade history',    color: '#B45309', icon: TrendingUp, route: '/agents/trading',   tags: ['pnl','risk','signals'] },
   { id: 'journal',    name: 'Journal & Health',   shortDesc: 'Mood, energy & health logs',   color: '#0369A1', icon: Activity,   route: '/agents/journal',   tags: ['mood','energy','health'] },
   { id: 'scheduler',  name: 'Scheduler',          shortDesc: 'Week view & smart planning',   color: '#6D28D9', icon: Calendar,   route: '/agents/scheduler', tags: ['week','overdue','alerts'] },
@@ -249,7 +249,7 @@ export default function AgentsHubPage() {
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             {[
               { label: '☀️ Morning Brief',   route: '/briefing/morning',      color: '#B45309' },
-              { label: '📋 Plan Today',       route: '/agent',                 color: '#0F766E' },
+              { label: '📋 Plan Today',       route: '/agents/assistant',      color: '#0F766E' },
               { label: '📓 Journal',          route: '/agents/journal',        color: '#0369A1' },
               { label: '🔥 Habits',           route: '/agents/habit-tracker',  color: '#065F46' },
               { label: '📈 Trading',          route: '/agents/trading',        color: '#B45309' },
