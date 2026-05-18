@@ -47,6 +47,7 @@ async function preflight(
   agentId: AgentId,
   userMessage: string
 ): Promise<{ data: unknown; summary: string } | null> {
+  try {
   const m = userMessage.toLowerCase()
 
   if (agentId === 'memory') {
@@ -142,6 +143,10 @@ async function preflight(
   }
 
   return null
+  } catch (err) {
+    console.error('[preflight]', agentId, err instanceof Error ? err.message : err)
+    return null // preflight failure is non-fatal — LLM will answer without live data
+  }
 }
 
 async function runAgent(
@@ -215,12 +220,17 @@ async function runAgent(
 
 export async function POST(req: NextRequest) {
   const startedAt = Date.now()
-  const body = await req.json()
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let body: any
+  try { body = await req.json() } catch {
+    return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 })
+  }
   const { messages, model = 'deepseek-r1:7b', agentId: forcedAgent } = body
   // Accept both session_id (what client sends) and sessionId (legacy)
   const sessionId: string | undefined = body.sessionId ?? body.session_id
   const userMessage = messages[messages.length - 1]?.content ?? ''
 
+  try {
   // 1. Build shared context once (cheap DB reads + file reads)
   const ctx = await buildAgentContext()
 
@@ -295,4 +305,9 @@ export async function POST(req: NextRequest) {
       reason: intent.reason,
     },
   })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error('[orchestrator]', msg)
+    return NextResponse.json({ error: msg, reply: '⚠️ Something went wrong. Please try again.', toolResults: [] }, { status: 500 })
+  }
 }
