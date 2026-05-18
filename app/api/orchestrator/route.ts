@@ -22,7 +22,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 )
 
-const TOOL_REGEX = /```(?:tool|json)\s*([\s\S]*?)```/g
+const TOOL_REGEX = /```tool\s*([\s\S]*?)```/g
 
 // ── Dispatch a single tool call to the right executor ────────────────────
 async function dispatchTool(agentId: AgentId, action: string, params: Record<string, unknown>) {
@@ -56,7 +56,18 @@ async function preflight(
   }
 
   if (agentId === 'trading') {
-    const result = executeTradingAction('get_performance_summary', {})
+    // Route to today's data if the question is about today/recent, otherwise all-time summary
+    if (/today|this session|right now|recent|latest|just now|friday|yesterday|last session/i.test(m)) {
+      const [todayResult, summaryResult] = await Promise.all([
+        executeTradingAction('get_today_trades', {}),
+        executeTradingAction('get_performance_summary', {}),
+      ])
+      return {
+        data: { today: todayResult.data, overall: summaryResult.data },
+        summary: `Today: ${todayResult.message}. Overall: ${summaryResult.message}`,
+      }
+    }
+    const result = await executeTradingAction('get_performance_summary', {})
     return { data: result.data, summary: result.message }
   }
 
@@ -78,7 +89,8 @@ async function preflight(
   }
 
   if (agentId === 'habit-tracker') {
-    const result = await executeHabitAction('get_streaks', {})
+    // Use weekly summary — single query, much faster than get_streaks (which does N queries)
+    const result = await executeHabitAction('get_weekly_summary', {})
     return { data: result.data, summary: result.message }
   }
 
@@ -87,9 +99,41 @@ async function preflight(
     return { data: result.data, summary: result.message }
   }
 
+  if (agentId === 'research') {
+    // Fetch real papers — slim fields only to keep context small for 7b model
+    const [papersResult, projectsResult] = await Promise.all([
+      executeResearchAction('list_papers', {}),
+      executeResearchAction('list_research_projects', {}),
+    ])
+    type PaperRow = { id: string; title: string; authors: string; year: number; tags: string[]; summary: string | null; dissertation_relevance: number | null; reading_status: string }
+    const allPapers = (papersResult.data as PaperRow[] ?? [])
+    // Slim down: only fields the LLM needs, cap at 20
+    const slimPapers = allPapers.slice(0, 20).map(p => ({
+      title: p.title, authors: p.authors, year: p.year,
+      tags: p.tags?.slice(0, 4) ?? [],
+      relevance: p.dissertation_relevance,
+      status: p.reading_status,
+      has_summary: !!p.summary,
+    }))
+    // If search query, add keyword search results too
+    if (/find|search|about|related|on topic|which paper|recommend/i.test(m)) {
+      const searchResult = await executeResearchAction('search_papers', { query: userMessage })
+      return {
+        data: { papers: slimPapers, projects: projectsResult.data, searchResults: searchResult.data },
+        summary: `${allPapers.length} papers in library. Keyword search: ${searchResult.message}`,
+      }
+    }
+    return {
+      data: { papers: slimPapers, projects: projectsResult.data },
+      summary: `${allPapers.length} papers in your library, ${projectsResult.message}`,
+    }
+  }
+
   if (agentId === 'knowledge') {
-    // Extract search query and hit ChromaDB directly
-    const result = await executeKnowledgeAction('search_knowledge', { query: userMessage, top_k: 5 })
+    // Search ChromaDB — skip pre-flight embed (too slow), let the action handle it
+    // Only pre-fetch if ChromaDB is up (fast heartbeat check already done in executeKnowledgeAction)
+    const result = await executeKnowledgeAction('search_knowledge', { query: userMessage, top_k: 4 })
+    if (!result.ok) return null // ChromaDB down — fall through to LLM-only response
     return { data: result.data, summary: result.message }
   }
 
@@ -127,37 +171,46 @@ async function runAgent(
   const pre = await preflight(agentId, userMessage)
 
   let augmentedMessages = messages
+  let activeSystemPrompt = systemPrompt
   if (pre) {
     toolResults.push(pre.data)
-    // Inject fetched data as a system context message before the LLM call
-    const dataContext = `[Data fetched from your ${agentId} database]\n${JSON.stringify(pre.data, null, 2)}\n\nSummary: ${pre.summary}\n\nNow answer the user's question using only this data. Be concise and natural.`
+    // When data is pre-fetched, use a simpler system prompt that doesn't ask for tool calls
+    // This prevents the model from trying to call tools when data is already injected
+    activeSystemPrompt = `You are a helpful ${agentId} assistant. The data below has already been fetched from the database — do NOT emit tool blocks. Answer the user's question directly and concisely using this data.`
+    const dataContext = `[Live data from ${agentId}]\n${JSON.stringify(pre.data, null, 2)}\n\nSummary: ${pre.summary}`
     augmentedMessages = [
       ...messages.slice(0, -1),
       { role: 'user', content: `${userMessage}\n\n${dataContext}` },
     ]
   }
 
-  // 2. LLM call — may still emit tool blocks for write operations
-  const raw = await callOllama(augmentedMessages, systemPrompt)
+  // 2. LLM call — may still emit tool blocks for write operations (only when no pre-flight)
+  const raw = await callOllama(augmentedMessages, activeSystemPrompt)
 
-  // 3. Parse any additional tool blocks (write operations like save, send, etc.)
+  // 3. Parse any tool blocks (only ```tool fences — not json/code fences)
   let match
   const regex = new RegExp(TOOL_REGEX.source, 'g')
   while ((match = regex.exec(raw)) !== null) {
     try {
-      const { action, params } = JSON.parse(match[1].trim())
+      const jsonStr = match[1].trim()
+        .replace(/\\n/g, ' ')      // unescape \n inside strings
+        .replace(/[\x00-\x1f\x7f]/g, ' ') // strip control chars
+      const { action, params } = JSON.parse(jsonStr)
+      if (!action) continue
       const result = await dispatchTool(agentId, action, params ?? {})
       toolResults.push(result)
-    } catch (e) {
-      toolResults.push({ ok: false, message: `Parse error: ${String(e)}` })
+    } catch {
+      // Silently skip malformed tool blocks — don't surface parse errors to user
     }
   }
 
-  const replyText = raw.replace(/```(?:tool|json)[\s\S]*?```/g, '').trim()
+  // Strip only ```tool blocks from reply (leave ```json/code for display)
+  const replyText = raw.replace(/```tool[\s\S]*?```/g, '').trim()
   return { reply: replyText, toolResults }
 }
 
 export async function POST(req: NextRequest) {
+  const startedAt = Date.now()
   const body = await req.json()
   const { messages, model = 'deepseek-r1:7b', agentId: forcedAgent } = body
   // Accept both session_id (what client sends) and sessionId (legacy)
@@ -185,23 +238,38 @@ export async function POST(req: NextRequest) {
 
   const allToolResults = responses.flatMap(r => r.toolResults)
 
-  // 5. Persist to Supabase (fire-and-forget)
-  // Log routing decision for debugging + routing improvement
-  void supabase.from('agent_intent_log').insert({
-    user_message: userMessage.slice(0, 500),
-    primary_agent: intent.primaryAgent,
-    secondary_agents: intent.secondaryAgents,
-    confidence: intent.confidence,
-    reason: intent.reason,
-    session_id: sessionId ?? null,
+  const durationMs = Date.now() - startedAt
+
+  // 5. Persist to Supabase — awaited so inserts complete before response returns
+  const toolActions = allToolResults.map(r => {
+    const res = r as { ok?: boolean; message?: string }
+    return res.ok !== undefined ? `${res.ok ? '✓' : '✗'} ${res.message?.slice(0, 60)}` : String(r).slice(0, 60)
   })
 
-  if (sessionId) {
+  const persistOps = [
+    supabase.from('agent_intent_log').insert({
+      user_message: userMessage.slice(0, 500),
+      primary_agent: intent.primaryAgent,
+      secondary_agents: intent.secondaryAgents,
+      confidence: intent.confidence,
+      reason: intent.reason,
+      session_id: sessionId ?? null,
+      tool_actions: toolActions,
+      tool_results_ok: allToolResults.map(r => (r as { ok?: boolean }).ok ?? true),
+      reply_length: finalReply.length,
+      duration_ms: durationMs,
+    }).then(() => {}),
+  ]
+
+  // Persist messages sequentially (user then assistant) to guarantee correct order in DB
+  const sessionPersist = sessionId ? (async () => {
     const lastUser = messages[messages.length - 1]
-    void supabase.from('agent_messages').insert({ session_id: sessionId, role: lastUser.role, content: lastUser.content })
-    void supabase.from('agent_messages').insert({ session_id: sessionId, role: 'assistant', content: finalReply, tool_results: allToolResults.length ? allToolResults : null })
-    void supabase.from('agent_sessions').update({ last_message_at: new Date().toISOString(), agent_id: intent.primaryAgent }).eq('id', sessionId)
-  }
+    await supabase.from('agent_messages').insert({ session_id: sessionId, role: lastUser.role, content: lastUser.content })
+    await supabase.from('agent_messages').insert({ session_id: sessionId, role: 'assistant', content: finalReply, tool_results: allToolResults.length ? allToolResults : null })
+    await supabase.from('agent_sessions').update({ last_message_at: new Date().toISOString(), agent_id: intent.primaryAgent }).eq('id', sessionId)
+  })() : Promise.resolve()
+
+  await Promise.all([...persistOps, sessionPersist])
 
   // 6. Auto-extract memories every 4 user messages (fire-and-forget)
   const userMsgCount = messages.filter((m: { role: string }) => m.role === 'user').length
