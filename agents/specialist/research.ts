@@ -42,9 +42,19 @@ export async function executeResearchAction(action: string, params: Record<strin
     }
 
     case 'get_paper_details': {
-      const query = String(params.title || params.query || '')
-      const { data } = await supabase.from('research_papers')
-        .select('*').ilike('title', `%${query}%`).limit(1).single()
+      const query = String(params.title || params.query || params.paper_id || '')
+      // Try exact id match first, then title, then authors
+      let data: Record<string, unknown> | null = null
+      const { data: byId } = await supabase.from('research_papers').select('*').eq('id', query).limit(1).maybeSingle()
+      if (byId) { data = byId }
+      if (!data) {
+        const { data: byTitle } = await supabase.from('research_papers').select('*').ilike('title', `%${query}%`).limit(1).maybeSingle()
+        if (byTitle) data = byTitle
+      }
+      if (!data) {
+        const { data: byAuthor } = await supabase.from('research_papers').select('*').ilike('authors', `%${query}%`).limit(1).maybeSingle()
+        if (byAuthor) data = byAuthor
+      }
       if (!data) return { ok: false, message: `No paper matching "${query}"` }
       return { ok: true, message: `Found: ${data.title}`, data }
     }
@@ -225,6 +235,123 @@ Provide:
           snippet: p.snippet,
           cite_as: `(${p.authors?.split(',')[0] ?? 'Unknown'}, ${p.year ?? 'n.d.'})`,
         })),
+      }
+    }
+
+    // ── Citation graph — fetch via Semantic Scholar API ───────────────────
+    case 'fetch_citations': {
+      // params: paper_id (uuid) — fetch references + citations from Semantic Scholar
+      const paperId = params.paper_id as string
+      if (!paperId) return { ok: false, message: 'paper_id required' }
+
+      const { data: paper } = await supabase
+        .from('research_papers')
+        .select('id,title,authors,year,s2_paper_id,citations_fetched_at')
+        .eq('id', paperId)
+        .single()
+
+      if (!paper) return { ok: false, message: 'Paper not found' }
+
+      // Find Semantic Scholar ID by title search if not stored
+      let s2Id = paper.s2_paper_id as string | null
+      if (!s2Id) {
+        const searchUrl = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(paper.title)}&fields=paperId,title,year&limit=1`
+        const searchRes = await fetch(searchUrl, { signal: AbortSignal.timeout(10000) })
+        if (searchRes.ok) {
+          const searchData = await searchRes.json()
+          s2Id = searchData.data?.[0]?.paperId ?? null
+          if (s2Id) {
+            await supabase.from('research_papers').update({ s2_paper_id: s2Id }).eq('id', paperId)
+          }
+        }
+      }
+
+      if (!s2Id) return { ok: false, message: `Could not find "${paper.title}" on Semantic Scholar` }
+
+      // Fetch references (papers this paper cites) and citations (papers that cite this)
+      const [refsRes, citedByRes] = await Promise.all([
+        fetch(`https://api.semanticscholar.org/graph/v1/paper/${s2Id}/references?fields=paperId,title,authors,year,venue,citationCount&limit=50`, { signal: AbortSignal.timeout(10000) }),
+        fetch(`https://api.semanticscholar.org/graph/v1/paper/${s2Id}/citations?fields=paperId,title,authors,year,venue,citationCount&limit=50`, { signal: AbortSignal.timeout(10000) }),
+      ])
+
+      const [refsData, citedByData] = await Promise.all([
+        refsRes.ok ? refsRes.json() : { data: [] },
+        citedByRes.ok ? citedByRes.json() : { data: [] },
+      ])
+
+      type S2Paper = { citedPaper?: { paperId: string; title: string; authors: { name: string }[]; year: number; venue: string; citationCount: number }; citingPaper?: { paperId: string; title: string; authors: { name: string }[]; year: number; venue: string; citationCount: number } }
+
+      const refs = (refsData.data ?? []) as S2Paper[]
+      const citedBys = (citedByData.data ?? []) as S2Paper[]
+
+      // Upsert into paper_citations
+      const toInsert = [
+        ...refs.map((r) => {
+          const p = r.citedPaper
+          if (!p) return null
+          return { paper_id: paperId, external_id: p.paperId, title: p.title, authors: p.authors?.map((a) => a.name).join(', '), year: p.year, venue: p.venue, citation_count: p.citationCount, relation: 'cites' }
+        }).filter(Boolean),
+        ...citedBys.map((r) => {
+          const p = r.citingPaper
+          if (!p) return null
+          return { paper_id: paperId, external_id: p.paperId, title: p.title, authors: p.authors?.map((a) => a.name).join(', '), year: p.year, venue: p.venue, citation_count: p.citationCount, relation: 'cited_by' }
+        }).filter(Boolean),
+      ]
+
+      if (toInsert.length) {
+        await supabase.from('paper_citations').upsert(toInsert as object[], { onConflict: 'paper_id,external_id,relation', ignoreDuplicates: true })
+      }
+
+      await supabase.from('research_papers').update({ citations_fetched_at: new Date().toISOString() }).eq('id', paperId)
+
+      return {
+        ok: true,
+        message: `Fetched ${refs.length} references and ${citedBys.length} citing papers for "${paper.title}"`,
+        data: { references: refs.length, cited_by: citedBys.length, s2_id: s2Id },
+      }
+    }
+
+    case 'get_citations': {
+      // params: paper_id (uuid), relation? ('cites'|'cited_by'|'all')
+      const paperId  = params.paper_id as string
+      const relation = (params.relation as string) || 'all'
+      if (!paperId) return { ok: false, message: 'paper_id required' }
+
+      let q = supabase.from('paper_citations')
+        .select('title,authors,year,venue,citation_count,relation')
+        .eq('paper_id', paperId)
+        .order('citation_count', { ascending: false })
+        .limit(30)
+
+      if (relation !== 'all') q = q.eq('relation', relation)
+      const { data, error } = await q
+      if (error) return { ok: false, message: error.message }
+      return { ok: true, message: `${data?.length || 0} citation entries`, data }
+    }
+
+    case 'find_foundational_papers': {
+      // Find highly cited papers in our library's citation graph — foundational work
+      const { data } = await supabase
+        .from('paper_citations')
+        .select('title,authors,year,citation_count,external_id')
+        .eq('relation', 'cites')
+        .order('citation_count', { ascending: false })
+        .limit(20)
+
+      if (!data?.length) return { ok: true, message: 'No citation data yet — run fetch_citations first', data: [] }
+
+      // Dedupe by external_id
+      const seen = new Set<string>()
+      const unique = data.filter(r => {
+        if (seen.has(r.external_id)) return false
+        seen.add(r.external_id)
+        return true
+      }).slice(0, 10)
+
+      return {
+        ok: true,
+        message: `Top ${unique.length} foundational papers by citation count`,
+        data: unique,
       }
     }
 
