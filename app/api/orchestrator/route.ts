@@ -16,6 +16,7 @@ import { executeKnowledgeAction } from '@/agents/specialist/knowledge'
 import { executeMemoryAction } from '@/agents/specialist/memory'
 import { executeEmailAction } from '@/agents/specialist/email'
 import { executeDigesterAction } from '@/agents/specialist/paper-digester'
+import { storeEpisode, retrieveSimilarEpisodes } from '@/agents/shared/episodes'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -34,8 +35,8 @@ const AGENT_TOOL_ALLOWLIST: Record<string, string[]> = {
   knowledge:      ['search_knowledge','embed_paper','embed_all_papers','status','reindex'],
   memory:         ['save','recall','forget','get_summary','list','debug_code','extract_from_conversation'],
   email:          ['get_unread_count','fetch_inbox','read_email','triage_inbox','summarize_email','draft_reply','send_email','send_reply','search_emails'],
-  'paper-digester':['digest_one','digest_all','get_jobs'],
-  research:       ['list_research_projects','list_papers','search_papers','get_paper_details','list_highlights','get_reading_stats','draft_section','outline_chapter','improve_paragraph','find_citations_for'],
+  'paper-digester':['digest_one','digest_all','get_jobs','extract_arguments_for','get_undigested'],
+  research:       ['list_research_projects','list_papers','search_papers','get_paper_details','list_highlights','get_reading_stats','draft_section','outline_chapter','improve_paragraph','find_citations_for','fetch_citations','get_citations','find_foundational_papers'],
 }
 
 // ── Dispatch a single tool call to the right executor ────────────────────
@@ -70,61 +71,75 @@ async function preflight(
   try {
   const m = userMessage.toLowerCase()
 
+  // Episodes run in parallel with agent-specific data fetching
+  const episodePromise = retrieveSimilarEpisodes({ query: userMessage, agentId, topK: 3 })
+
+  let agentData: { data: unknown; summary: string } | null = null
+
   if (agentId === 'memory') {
-    // Always load memory summary before responding
     const result = await executeMemoryAction('get_summary', {})
-    return { data: result.data, summary: result.message }
+    agentData = { data: result.data, summary: result.message }
   }
 
-  if (agentId === 'trading') {
-    // Route to today's data if the question is about today/recent, otherwise all-time summary
+  else if (agentId === 'trading') {
     if (/today|this session|right now|recent|latest|just now|friday|yesterday|last session/i.test(m)) {
       const [todayResult, summaryResult] = await Promise.all([
         executeTradingAction('get_today_trades', {}),
         executeTradingAction('get_performance_summary', {}),
       ])
-      return {
+      agentData = {
         data: { today: todayResult.data, overall: summaryResult.data },
         summary: `Today: ${todayResult.message}. Overall: ${summaryResult.message}`,
       }
+    } else {
+      const result = await executeTradingAction('get_performance_summary', {})
+      agentData = { data: result.data, summary: result.message }
     }
-    const result = await executeTradingAction('get_performance_summary', {})
-    return { data: result.data, summary: result.message }
   }
 
-  if (agentId === 'journal') {
+  else if (agentId === 'journal') {
     if (/pattern|energy|week|trend|how (am|was|have)/i.test(m)) {
       const result = await executeJournalAction('get_energy_pattern', { days: 14 })
-      return { data: result.data, summary: result.message }
+      agentData = { data: result.data, summary: result.message }
+    } else {
+      const result = await executeJournalAction('get_today_entry', {})
+      agentData = { data: result.data, summary: result.message }
     }
-    const result = await executeJournalAction('get_today_entry', {})
-    return { data: result.data, summary: result.message }
   }
 
-  if (agentId === 'scheduler') {
+  else if (agentId === 'scheduler') {
     const [alerts, overdue] = await Promise.all([
       executeSchedulerAction('get_alerts', {}),
       executeSchedulerAction('get_overdue', {}),
     ])
-    return { data: { alerts: alerts.data, overdue: overdue.data }, summary: `${alerts.message}, ${overdue.message}` }
+    agentData = { data: { alerts: alerts.data, overdue: overdue.data }, summary: `${alerts.message}, ${overdue.message}` }
   }
 
-  if (agentId === 'habit-tracker') {
-    // Use weekly summary — single query, much faster than get_streaks (which does N queries)
+  else if (agentId === 'habit-tracker') {
     const result = await executeHabitAction('get_weekly_summary', {})
-    return { data: result.data, summary: result.message }
+    agentData = { data: result.data, summary: result.message }
   }
 
-  if (agentId === 'email' && /unread|inbox|check|how many|triage/i.test(m)) {
+  else if (agentId === 'email' && /unread|inbox|check|how many|triage/i.test(m)) {
     const result = await executeEmailAction('get_unread_count', {})
-    return { data: result.data, summary: result.message }
+    agentData = { data: result.data, summary: result.message }
   }
 
-  if (agentId === 'research') {
+  else if (agentId === 'research') {
     type PaperRow = { id: string; title: string; authors: string; year: number; tags: string[]; summary: string | null; dissertation_relevance: number | null; reading_status: string }
-    // For search queries: use semantic/keyword search for top 5 relevant papers (fast, focused)
-    // Always use ChromaDB semantic search — far more powerful than keyword matching
-    {
+
+    // For questions about a specific paper's details/methodology/arguments: fetch full paper record
+    if (/methodology|main.?claim|argument|limitation|finding|contribution|from the .+paper|paper.{0,30}(watts|dakos|romero|baumgartner|velickovic|milo|lazer|dorogovtsev)/i.test(m)) {
+      const detailResult = await executeResearchAction('get_paper_details', { query: userMessage })
+      if (detailResult.ok && detailResult.data) {
+        agentData = {
+          data: { paper: detailResult.data },
+          summary: `Full details for: ${detailResult.message}`,
+        }
+      }
+    }
+
+    if (!agentData) {
       const [searchResult, projectsResult] = await Promise.all([
         executeKnowledgeAction('search_knowledge', { query: userMessage, top_k: 5 }),
         executeResearchAction('list_research_projects', {}),
@@ -135,37 +150,64 @@ async function preflight(
           title: h.title, authors: h.authors, year: h.year,
           score: h.score, excerpt: h.snippet?.slice(0, 150),
         }))
-        return {
+        agentData = {
           data: { relevant_papers: hits, projects: projectsResult.data },
-          summary: `Top ${hits.length} semantically relevant papers from your library of 34.`,
+          summary: `Top ${hits.length} semantically relevant papers from your library.`,
+        }
+      } else {
+        const [papersResult, projectsResult2] = await Promise.all([
+          executeResearchAction('list_papers', {}),
+          executeResearchAction('list_research_projects', {}),
+        ])
+        const allPapers = (papersResult.data as PaperRow[] ?? [])
+        const index = allPapers.slice(0, 15).map(p => `${p.title} (${p.authors?.split(',')[0] ?? ''}, ${p.year})`)
+        agentData = {
+          data: { library_index: index, total: allPapers.length, projects: projectsResult2.data },
+          summary: `${allPapers.length} papers in library, ${projectsResult2.message}`,
         }
       }
     }
-    // For general queries: inject compact library index (title + year only, up to 15)
-    const [papersResult, projectsResult] = await Promise.all([
-      executeResearchAction('list_papers', {}),
-      executeResearchAction('list_research_projects', {}),
-    ])
-    const allPapers = (papersResult.data as PaperRow[] ?? [])
-    const index = allPapers.slice(0, 15).map(p => `${p.title} (${p.authors?.split(',')[0] ?? ''}, ${p.year})`)
-    return {
-      data: { library_index: index, total: allPapers.length, projects: projectsResult.data },
-      summary: `${allPapers.length} papers in library, ${projectsResult.message}`,
+  }
+
+  else if (agentId === 'knowledge') {
+    const result = await executeKnowledgeAction('search_knowledge', { query: userMessage, top_k: 4 })
+    if (result.ok) agentData = { data: result.data, summary: result.message }
+  }
+
+  else if (agentId === 'paper-digester') {
+    // If user asks about a specific paper's content, look it up by author name or keyword
+    if (/methodology|claim|finding|limitation|argument|summary|from the|about the/i.test(m)) {
+      // Extract the most useful search term: prefer author surnames or quoted titles
+      const authorMatch = m.match(/\b(watts|dakos|romero|baumgartner|velickovic|milo|lazer|dorogovtsev|[a-z]{4,})\s+\d{4}\b/)
+      const keyword = authorMatch?.[1] ?? userMessage.replace(/give me|what is|the|from|paper|\d{4}/gi, '').trim().split(/\s+/)[0]
+      if (keyword) {
+        const detailResult = await executeResearchAction('get_paper_details', { query: keyword })
+        if (detailResult.ok && detailResult.data) {
+          agentData = { data: { paper: detailResult.data }, summary: detailResult.message }
+        }
+      }
     }
   }
 
-  if (agentId === 'knowledge') {
-    // Search ChromaDB — skip pre-flight embed (too slow), let the action handle it
-    // Only pre-fetch if ChromaDB is up (fast heartbeat check already done in executeKnowledgeAction)
-    const result = await executeKnowledgeAction('search_knowledge', { query: userMessage, top_k: 4 })
-    if (!result.ok) return null // ChromaDB down — fall through to LLM-only response
-    return { data: result.data, summary: result.message }
+  // Merge episodes into result
+  const episodes = await episodePromise
+  if (!agentData && !episodes.length) return null
+
+  if (!agentData) {
+    return { data: { past_episodes: episodes }, summary: `${episodes.length} similar past conversations retrieved` }
   }
 
-  return null
+  if (episodes.length) {
+    agentData = {
+      data: { ...(agentData.data as object), past_episodes: episodes },
+      summary: agentData.summary,
+    }
+  }
+
+  return agentData
   } catch (err) {
     console.error('[preflight]', agentId, err instanceof Error ? err.message : err)
-    return null // preflight failure is non-fatal — LLM will answer without live data
+    return null
   }
 }
 
@@ -374,6 +416,17 @@ export async function POST(req: NextRequest) {
       agent_id: intent.primaryAgent,
     }).catch(() => {})
   }
+
+  // 7. Store episode — awaited so the row exists before response returns (embedding backfills async)
+  const thinkMatch = finalReply.match(/<think>([\s\S]*?)<\/think>/i)
+  await storeEpisode({
+    sessionId:   sessionId ?? null,
+    agentId:     intent.primaryAgent,
+    userMessage,
+    agentReply:  finalReply.replace(/<think>[\s\S]*?<\/think>/gi, '').trim(),
+    toolActions,
+    reasoning:   thinkMatch?.[1]?.trim(),
+  }).catch(() => {})
 
   return NextResponse.json({
     reply: finalReply,

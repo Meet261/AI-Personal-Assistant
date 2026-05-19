@@ -68,6 +68,9 @@ export async function digestPaper(paperId: string, paperText: string): Promise<{
     ]
     await supabase.from('research_papers').update({ tags: allTags }).eq('id', paperId)
 
+    // Second Haiku call: structured argument extraction
+    extractArguments(paperId, paperText, parsed.summary ?? '').catch(() => {})
+
     // Log token usage for budget tracking
     await supabase.from('agent_token_usage').insert({
       agent_id: 'paper-digester',
@@ -83,6 +86,36 @@ export async function digestPaper(paperId: string, paperText: string): Promise<{
   }
 }
 
+const ARGUMENT_SYSTEM = `You are an expert at extracting structured arguments from academic papers.
+Given a paper's text and summary, extract the following. Respond ONLY in valid JSON:
+{
+  "main_claim": "The central thesis or contribution in 1-2 sentences",
+  "methodology": "Research design and methods in 1 sentence",
+  "key_findings": "The top 2-3 concrete findings as a single paragraph",
+  "limitations": "Acknowledged limitations or weaknesses in 1-2 sentences"
+}
+Be precise and quote the paper's own language where possible.`
+
+async function extractArguments(paperId: string, paperText: string, summary: string): Promise<void> {
+  try {
+    const prompt = `Summary: ${summary}\n\nPaper (first 6000 chars):\n${paperText.slice(0, 6000)}`
+    const raw = await callHaiku([{ role: 'user', content: prompt }], ARGUMENT_SYSTEM)
+    const jsonMatch = raw.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) return
+    const parsed = JSON.parse(jsonMatch[0])
+
+    await supabase.from('research_papers').update({
+      main_claim:               parsed.main_claim ?? null,
+      methodology:              parsed.methodology ?? null,
+      key_findings:             parsed.key_findings ?? null,
+      limitations:              parsed.limitations ?? null,
+      arguments_extracted_at:   new Date().toISOString(),
+    }).eq('id', paperId)
+  } catch {
+    // Non-fatal — argument extraction is best-effort
+  }
+}
+
 export async function executeDigesterAction(action: string, params: Record<string, unknown>) {
   switch (action) {
     case 'digest_paper': {
@@ -92,11 +125,28 @@ export async function executeDigesterAction(action: string, params: Record<strin
       return digestPaper(paperId, text)
     }
     case 'get_undigested': {
-      // Papers with no summary yet
       const { data } = await supabase.from('research_papers')
         .select('id,title,has_pdf').is('summary', null).limit(10)
       return { ok: true, message: `${data?.length || 0} papers without summaries`, data }
     }
+
+    // ── extract_arguments_for — run argument extraction on a specific paper ─
+    case 'extract_arguments_for': {
+      const paperId = params.paper_id as string
+      if (!paperId) return { ok: false, message: 'paper_id required' }
+
+      const { data: paper } = await supabase.from('research_papers')
+        .select('id,title,summary,notes').eq('id', paperId).single()
+      if (!paper) return { ok: false, message: 'Paper not found' }
+      if (!paper.summary) return { ok: false, message: 'Digest paper first (no summary yet)' }
+
+      // Use the notes field as stand-in for the paper text (it contains key findings from digest)
+      const fakeText = `${paper.summary}\n\n${paper.notes ?? ''}`
+      await extractArguments(paperId, fakeText, paper.summary)
+
+      return { ok: true, message: `Arguments extracted for "${paper.title}"` }
+    }
+
     default:
       return { ok: false, message: `Unknown action: ${action}` }
   }
