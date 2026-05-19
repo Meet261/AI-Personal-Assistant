@@ -85,6 +85,38 @@ export async function callOllama(
   }
 }
 
+// Call DeepSeek V3 via API — used for structured tool-call dispatch
+// Much more reliable than R1 for JSON output; costs ~$0.28/M input tokens
+export async function callDeepSeekV3(
+  messages: { role: string; content: string }[],
+  systemPrompt: string,
+): Promise<string> {
+  const apiKey = process.env.DEEPSEEK_API_KEY
+  if (!apiKey) throw new Error('DEEPSEEK_API_KEY not set')
+
+  const res = await fetch('https://api.deepseek.com/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: 'deepseek-chat', // V3
+      messages: [{ role: 'system', content: systemPrompt }, ...messages],
+      temperature: 0.0,       // zero temp for deterministic tool JSON
+      max_tokens: 512,        // tool calls are short — cap spend
+    }),
+    signal: AbortSignal.timeout(30_000), // 30s — V3 is fast
+  })
+
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`DeepSeek V3 error: ${res.status} ${err}`)
+  }
+  const data = await res.json()
+  return (data.choices?.[0]?.message?.content as string ?? '').trim()
+}
+
 // Call Claude Haiku (API)
 export async function callHaiku(
   messages: { role: string; content: string }[],

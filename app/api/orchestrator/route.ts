@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { classifyIntent, buildAgentSystemPrompt, synthesize } from '@/agents/orchestrator'
 import { buildAgentContext } from '@/agents/shared/context'
-import { callOllama, modelForAgent } from '@/agents/shared/models'
+import { callOllama, callDeepSeekV3, modelForAgent } from '@/agents/shared/models'
 import type { AgentId } from '@/agents/shared/types'
 
 // Specialist agent executors — imported inline to keep one API route
@@ -192,28 +192,80 @@ async function runAgent(
     ]
   }
 
-  // 2. LLM call — use per-agent custom model (baked-in context window + domain prompt)
+  // 2. Choose model based on task:
+  //    - Pre-flight path (data already injected): R1 for reasoning — no tool calls needed
+  //    - No pre-flight (write ops, open-ended): V3 for reliable tool-call JSON, then R1 for final reply
+  const hasDeepSeekKey = !!process.env.DEEPSEEK_API_KEY
   const agentModel = modelForAgent(agentId)
-  const raw = await callOllama(augmentedMessages, activeSystemPrompt, agentModel)
 
-  // 3. Parse any tool blocks (only ```tool fences — not json/code fences)
+  let raw: string
+  if (pre) {
+    // Data already fetched — pure reasoning, use local R1
+    raw = await callOllama(augmentedMessages, activeSystemPrompt, agentModel)
+  } else if (hasDeepSeekKey) {
+    // No pre-flight — may need to emit tool calls
+    // Step A: V3 generates the tool block (fast, reliable JSON)
+    const toolSystemPrompt = `${activeSystemPrompt}
+
+IMPORTANT: If you need data, emit exactly ONE tool block in this format and nothing else:
+\`\`\`tool
+{"action":"<action>","params":{}}
+\`\`\`
+If no tool is needed, answer directly in plain English.`
+    const v3Raw = await callDeepSeekV3(augmentedMessages, toolSystemPrompt)
+
+    // Check if V3 emitted a tool block
+    const toolMatch = TOOL_REGEX.exec(v3Raw)
+    TOOL_REGEX.lastIndex = 0
+
+    if (toolMatch) {
+      // Execute the tool call from V3
+      try {
+        const jsonStr = toolMatch[1].trim().replace(/[\x00-\x1f\x7f]/g, ' ')
+        const { action, params } = JSON.parse(jsonStr)
+        if (action) {
+          const result = await dispatchTool(agentId, action, params ?? {})
+          toolResults.push(result)
+          // Step B: R1 generates the final human reply using tool result
+          const resultContext = `Tool result: ${JSON.stringify(result)}`
+          const finalMessages = [
+            ...augmentedMessages.slice(0, -1),
+            { role: 'user', content: `${userMessage}\n\n${resultContext}` },
+          ]
+          const finalSystemPrompt = `You are a helpful ${agentId} assistant. A tool was already called and returned the data above. Answer the user's question naturally using this data. Do NOT emit tool blocks.`
+          raw = await callOllama(finalMessages, finalSystemPrompt, agentModel)
+        } else {
+          raw = v3Raw.replace(/```tool[\s\S]*?```/g, '').trim()
+        }
+      } catch {
+        raw = v3Raw.replace(/```tool[\s\S]*?```/g, '').trim()
+      }
+    } else {
+      // V3 answered directly — use its response
+      raw = v3Raw
+    }
+  } else {
+    // No DeepSeek key — fall back to R1 for everything
+    raw = await callOllama(augmentedMessages, activeSystemPrompt, agentModel)
+  }
+
+  // 3. Parse any remaining tool blocks from R1 (write operations not caught above)
   let match
   const regex = new RegExp(TOOL_REGEX.source, 'g')
   while ((match = regex.exec(raw)) !== null) {
     try {
       const jsonStr = match[1].trim()
-        .replace(/\\n/g, ' ')      // unescape \n inside strings
-        .replace(/[\x00-\x1f\x7f]/g, ' ') // strip control chars
+        .replace(/\\n/g, ' ')
+        .replace(/[\x00-\x1f\x7f]/g, ' ')
       const { action, params } = JSON.parse(jsonStr)
       if (!action) continue
       const result = await dispatchTool(agentId, action, params ?? {})
       toolResults.push(result)
     } catch {
-      // Silently skip malformed tool blocks — don't surface parse errors to user
+      // Silently skip malformed tool blocks
     }
   }
 
-  // Strip only ```tool blocks from reply (leave ```json/code for display)
   const replyText = raw.replace(/```tool[\s\S]*?```/g, '').trim()
   return { reply: replyText, toolResults }
 }
