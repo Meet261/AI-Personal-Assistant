@@ -284,6 +284,61 @@ export default function DigesterAgentPage() {
     </div>
   )
 
+  // ── Actions tab: quick digest controls ────────────────────────────────────
+  const [selectedPaperId, setSelectedPaperId] = useState('')
+  const allPapers = [...digested, ...undigested]
+
+  const actions = (
+    <div style={{ maxWidth: 560 }}>
+      <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 14, padding: 24, marginBottom: 16 }}>
+        <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 800, color: 'var(--text)', fontFamily: 'Raleway' }}>Digest a Paper</h3>
+        <div style={{ marginBottom: 12 }}>
+          <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', display: 'block', marginBottom: 6, fontFamily: 'Raleway', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Select Paper</label>
+          <select
+            value={selectedPaperId}
+            onChange={e => setSelectedPaperId(e.target.value)}
+            style={{ width: '100%', padding: '9px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--faint)', color: 'var(--text)', fontFamily: 'Lato', fontSize: 13, outline: 'none' }}
+          >
+            <option value="">— choose a paper —</option>
+            <optgroup label={`Pending (${undigested.length})`}>
+              {undigested.map(p => <option key={p.id} value={p.id}>{p.title?.slice(0, 70)} ({p.year})</option>)}
+            </optgroup>
+            <optgroup label={`Re-digest (${digested.length})`}>
+              {digested.map(p => <option key={p.id} value={p.id}>{p.title?.slice(0, 70)} ({p.year})</option>)}
+            </optgroup>
+          </select>
+        </div>
+        <button
+          onClick={() => selectedPaperId && digestOne(selectedPaperId)}
+          disabled={!selectedPaperId || !!digesting}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', borderRadius: 10, border: 'none', background: selectedPaperId && !digesting ? COLOR : 'var(--faint)', color: selectedPaperId && !digesting ? '#fff' : 'var(--muted)', fontFamily: 'Raleway', fontWeight: 700, fontSize: 13, cursor: selectedPaperId && !digesting ? 'pointer' : 'default', transition: 'all .15s' }}
+        >
+          {digesting ? <><RefreshCw size={14} style={{ animation: 'spin .8s linear infinite' }} /> Digesting…</> : <><Zap size={14} /> Digest Paper</>}
+        </button>
+        {result && (
+          <div style={{ marginTop: 12, padding: '10px 14px', borderRadius: 8, background: result.startsWith('✓') ? '#22c55e10' : '#ef444410', color: result.startsWith('✓') ? '#16a34a' : '#dc2626', fontSize: 13, fontFamily: 'Lato' }}>
+            {result}
+          </div>
+        )}
+      </div>
+
+      <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
+        <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 800, color: 'var(--text)', fontFamily: 'Raleway' }}>Batch Actions</h3>
+        <div style={{ display: 'flex', gap: 10 }}>
+          <button onClick={() => digestAll(false)} disabled={jobRunning || undigested.length === 0}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 18px', borderRadius: 10, border: `1px solid ${COLOR}30`, background: `${COLOR}08`, color: COLOR, fontFamily: 'Raleway', fontWeight: 700, fontSize: 13, cursor: jobRunning || undigested.length === 0 ? 'default' : 'pointer', opacity: undigested.length === 0 ? 0.5 : 1 }}>
+            <Zap size={14} /> Digest All Pending ({undigested.length})
+          </button>
+          <button onClick={() => digestAll(true)} disabled={jobRunning}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 18px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--faint)', color: 'var(--muted)', fontFamily: 'Raleway', fontWeight: 700, fontSize: 13, cursor: jobRunning ? 'default' : 'pointer' }}>
+            <RefreshCw size={14} /> Re-digest All
+          </button>
+        </div>
+      </div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  )
+
   return (
     <AgentPageLayout
       agentId="paper-digester"
@@ -291,9 +346,10 @@ export default function DigesterAgentPage() {
       agentColor={COLOR}
       agentIcon={<Microscope size={20} />}
       description="Claude Haiku deep analysis · ~$0.004/paper · live progress tracking"
-      tabs={['dashboard', 'chat', 'settings']}
+      tabs={['dashboard', 'actions', 'chat', 'settings']}
       starters={['How many papers are undigested?', 'Which papers have the highest dissertation relevance?', 'What categories do my papers fall into?']}
       dashboard={dashboard}
+      actions={actions}
       settings={<div style={{ padding: 20, color: 'var(--muted)', fontFamily: 'Lato', fontSize: 13 }}>Paper Digester settings — configure digest prompt and cost limits here (coming soon).</div>}
       commandCenter={
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
