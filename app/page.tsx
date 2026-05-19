@@ -1,11 +1,12 @@
 'use client'
-import { useEffect, useState, useCallback } from 'react'
+import React, { useEffect, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { Task, Project, DailyBriefing } from '@/lib/types'
 import {
   CheckSquare, Clock, AlertCircle, TrendingUp,
   Sunrise, Moon, BookOpen, ChevronRight, ArrowUpRight,
-  Calendar, Layers, CheckCircle2, Circle, X, Zap
+  Calendar, Layers, CheckCircle2, Circle, X, Zap,
+  Activity, Brain, AlertTriangle
 } from 'lucide-react'
 import Link from 'next/link'
 import { format } from 'date-fns'
@@ -196,6 +197,12 @@ export default function Dashboard() {
     total_pnl: number; today_pnl: number; wins: number; losses: number
     win_rate: number; open_positions: number; symbols: string[]
   } | null>(null)
+  const [health, setHealth] = useState<{
+    services: { ollama: boolean; chroma: boolean; supabase: boolean }
+    episodes: { count: number }
+    energy: { avg14d: number | null; latest: number | null; entries: number; peakWindow: string | null }
+    momentum: { stalled: { name: string; daysSince: number }[] }
+  } | null>(null)
   const today = format(new Date(), 'yyyy-MM-dd')
 
   const load = useCallback(async () => {
@@ -221,6 +228,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     fetch('/api/trading/summary').then(r => r.ok ? r.json() : null).then(d => { if (d) setTrading(d) }).catch(() => {})
+    fetch('/api/system/health').then(r => r.ok ? r.json() : null).then(d => { if (d) setHealth(d) }).catch(() => {})
   }, [])
 
   const urgent     = tasks.filter(t => t.priority === 'urgent')
@@ -291,6 +299,80 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* ══ SYSTEM HEALTH BAR ══ */}
+      {health && (
+        <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 14, padding: '10px 20px', marginBottom: 14, display: 'flex', alignItems: 'center', gap: 20, flexWrap: 'wrap', boxShadow: 'var(--shadow-sm)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <Activity size={14} style={{ color: 'var(--brand2)' }} />
+            <span style={{ fontFamily: 'Raleway, sans-serif', fontWeight: 800, fontSize: 12, color: 'var(--muted)', letterSpacing: '.04em', textTransform: 'uppercase' }}>System</span>
+          </div>
+          <span style={{ width: 1, height: 16, background: 'var(--border)' }} />
+          {([
+            { label: 'Ollama',   ok: health.services.ollama   },
+            { label: 'ChromaDB', ok: health.services.chroma   },
+            { label: 'Supabase', ok: health.services.supabase },
+          ]).map(s => (
+            <div key={s.label} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <div style={{ width: 7, height: 7, borderRadius: '50%', background: s.ok ? '#27d98a' : '#ff5c7a', boxShadow: s.ok ? '0 0 5px #27d98a80' : 'none', flexShrink: 0 }} />
+              <span style={{ fontFamily: 'Lato, sans-serif', fontSize: 12, color: s.ok ? 'var(--text)' : 'var(--bad)', fontWeight: s.ok ? 400 : 700 }}>{s.label}</span>
+            </div>
+          ))}
+          <span style={{ width: 1, height: 16, background: 'var(--border)' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            <Brain size={12} style={{ color: 'var(--muted)' }} />
+            <span style={{ fontFamily: 'Lato, sans-serif', fontSize: 12, color: 'var(--muted)' }}>{health.episodes.count} episodes</span>
+          </div>
+        </div>
+      )}
+
+      {/* ══ ENERGY + MOMENTUM ROW ══ */}
+      {health && (health.energy.avg14d !== null || health.momentum.stalled.length > 0) && (
+        <div style={{ display: 'grid', gridTemplateColumns: health.energy.avg14d !== null && health.momentum.stalled.length > 0 ? '1fr 1fr' : '1fr', gap: 14, marginBottom: 14 }}>
+
+          {/* Energy card */}
+          {health.energy.avg14d !== null && (
+            <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderLeft: '3px solid #7c3aed', borderRadius: 14, padding: '14px 18px', boxShadow: 'var(--shadow-sm)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
+                <Zap size={14} style={{ color: '#7c3aed' }} />
+                <span style={{ fontFamily: 'Raleway, sans-serif', fontWeight: 800, fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Energy</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, marginBottom: 6 }}>
+                <span style={{ fontFamily: 'Raleway, sans-serif', fontWeight: 900, fontSize: 26, color: health.energy.avg14d >= 4 ? '#27d98a' : health.energy.avg14d < 2.5 ? '#ff5c7a' : '#3dd6d0' }}>
+                  {health.energy.avg14d}/5
+                </span>
+                <span style={{ fontFamily: 'Lato, sans-serif', fontSize: 12, color: 'var(--muted)' }}>14-day avg · yesterday {health.energy.latest ?? '—'}/5</span>
+              </div>
+              {health.energy.peakWindow && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'rgba(139,92,246,.1)', border: '1px solid rgba(139,92,246,.25)', borderRadius: 8, padding: '5px 10px' }}>
+                  <span style={{ fontSize: 11 }}>⚡</span>
+                  <span style={{ fontFamily: 'Lato, sans-serif', fontSize: 12, color: '#7c3aed', fontWeight: 600 }}>Peak focus window: {health.energy.peakWindow} — schedule deep work here</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Momentum card */}
+          {health.momentum.stalled.length > 0 && (
+            <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderLeft: '3px solid #fb923c', borderRadius: 14, padding: '14px 18px', boxShadow: 'var(--shadow-sm)' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 8 }}>
+                <AlertTriangle size={14} style={{ color: '#fb923c' }} />
+                <span style={{ fontFamily: 'Raleway, sans-serif', fontWeight: 800, fontSize: 12, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '.04em' }}>Project Momentum</span>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {health.momentum.stalled.map(p => (
+                  <div key={p.name} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                    <span style={{ fontFamily: 'Lato, sans-serif', fontSize: 13, color: 'var(--text)' }}>{p.name}</span>
+                    <span style={{ fontFamily: 'Raleway, sans-serif', fontWeight: 700, fontSize: 11, padding: '2px 8px', borderRadius: 20, background: p.daysSince >= 7 ? 'rgba(255,92,122,.12)' : 'rgba(251,146,60,.1)', color: p.daysSince >= 7 ? '#ff5c7a' : '#fb923c', flexShrink: 0 }}>
+                      {p.daysSince >= 7 ? `⚠️ ${p.daysSince}d stalled` : `⚡ ${p.daysSince}d slow`}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ══ STAT CARDS ══ */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 14, marginBottom: 20 }}>
