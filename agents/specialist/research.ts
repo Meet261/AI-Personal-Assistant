@@ -9,6 +9,7 @@ const supabase = createClient(
 )
 
 export async function executeResearchAction(action: string, params: Record<string, unknown>) {
+  try {
   switch (action) {
 
     // ── Paper library ──────────────────────────────────────────────────────
@@ -498,5 +499,10 @@ Provide:
 
     default:
       return { ok: false, message: `Unknown research action: ${action}` }
+  }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`[research] ${action} error:`, msg)
+    return { ok: false, message: `Research error: ${msg}` }
   }
 }

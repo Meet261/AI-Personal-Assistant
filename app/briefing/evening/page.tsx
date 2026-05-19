@@ -88,13 +88,16 @@ export default function EveningBriefingPage() {
           )}
 
           <div className="card" style={{ borderRadius: 'var(--r-lg)', padding: 24 }}>
-            <p style={{ ...S, fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--muted)', marginBottom: 14 }}>
-              Summary
-              {streaming && <span style={{ color: 'var(--brand2)', marginLeft: 8, fontWeight: 500, fontSize: 11, textTransform: 'none' }}>· generating…</span>}
-            </p>
+            {streaming && <p style={{ ...S, fontSize: 11, fontWeight: 700, color: 'var(--brand2)', marginBottom: 12, marginTop: 0 }}>Generating…</p>}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {content.split('\n\n').filter(Boolean).map((para, i) => (
-                <p key={i} style={{ fontSize: 13, lineHeight: 1.7, margin: 0, color: 'var(--text)', fontFamily: 'Lato, sans-serif' }}>{para}</p>
+              {content.split('\n\n').filter(p => p.trim() && !p.startsWith('PRIORITIES_JSON')).map((para, i) => (
+                <p key={i} style={{ fontSize: 13, lineHeight: 1.75, margin: 0, color: 'var(--text)', fontFamily: 'Lato, sans-serif' }}
+                  dangerouslySetInnerHTML={{ __html: para
+                    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+                    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+                    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+                  }}
+                />
               ))}
               {streaming && <span style={{ display: 'inline-block', width: 2, height: 16, background: 'var(--brand2)', animation: 'blink 1s step-end infinite', verticalAlign: 'middle', marginLeft: 2 }} />}
             </div>

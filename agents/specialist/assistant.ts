@@ -18,6 +18,7 @@ async function resolveProject(name: string): Promise<string | null> {
 }
 
 export async function executeAssistantAction(action: string, params: Record<string, unknown>) {
+  try {
   switch (action) {
     case 'add_project': {
       const { data, error } = await supabase.from('projects').insert({
@@ -272,5 +273,10 @@ Create a concise prep brief including:
 
     default:
       return { ok: false, message: `Unknown action: ${action}` }
+  }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`[assistant] ${action} error:`, msg)
+    return { ok: false, message: `Assistant error: ${msg}` }
   }
 }

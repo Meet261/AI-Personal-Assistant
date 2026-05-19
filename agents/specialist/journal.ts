@@ -8,7 +8,7 @@ const supabase = createClient(
 
 export async function executeJournalAction(action: string, params: Record<string, unknown>) {
   const today = new Date().toISOString().slice(0, 10)
-
+  try {
   switch (action) {
 
     // ── Journal entries ────────────────────────────────────────────────────
@@ -192,5 +192,10 @@ export async function executeJournalAction(action: string, params: Record<string
 
     default:
       return { ok: false, message: `Unknown journal action: ${action}` }
+  }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`[journal] ${action} error:`, msg)
+    return { ok: false, message: `Journal error: ${msg}` }
   }
 }

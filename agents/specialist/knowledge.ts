@@ -14,71 +14,63 @@ const OLLAMA_URL  = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434'
 const EMBED_MODEL = 'nomic-embed-text'
 const COLLECTION  = 'papers'
 
-// ── Embedding via Ollama nomic-embed-text ─────────────────────────────────
+// ── Embedding via Ollama nomic-embed-text (B2: try/catch) ────────────────
 async function embed(text: string): Promise<number[]> {
-  const res = await fetch(`${OLLAMA_URL}/api/embeddings`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: EMBED_MODEL, prompt: text }),
-  })
-  if (!res.ok) throw new Error(`Ollama embed error: ${res.statusText}`)
-  const data = await res.json()
-  return data.embedding as number[]
+  try {
+    const res = await fetch(`${OLLAMA_URL}/api/embeddings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model: EMBED_MODEL, prompt: text }),
+    })
+    if (!res.ok) throw new Error(`Ollama embed error: ${res.statusText}`)
+    const data = await res.json()
+    return data.embedding as number[]
+  } catch (e) { throw new Error(`embed failed: ${e instanceof Error ? e.message : e}`) }
 }
 
-// ── ChromaDB helpers ──────────────────────────────────────────────────────
+// ── ChromaDB helpers (B2: all wrapped in try/catch) ───────────────────────
 async function getOrCreateCollection(): Promise<string> {
-  // Get existing collection
-  const getRes = await fetch(`${CHROMA_URL}/api/v2/tenants/default_tenant/databases/default_database/collections/${COLLECTION}`)
-  if (getRes.ok) {
-    const col = await getRes.json()
-    return col.id
-  }
-
-  // Create if not found
-  const createRes = await fetch(`${CHROMA_URL}/api/v2/tenants/default_tenant/databases/default_database/collections`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      name: COLLECTION,
-      metadata: { 'hnsw:space': 'cosine' },
-    }),
-  })
-  if (!createRes.ok) throw new Error(`ChromaDB create collection failed: ${await createRes.text()}`)
-  const col = await createRes.json()
-  return col.id
+  try {
+    const getRes = await fetch(`${CHROMA_URL}/api/v2/tenants/default_tenant/databases/default_database/collections/${COLLECTION}`)
+    if (getRes.ok) { const col = await getRes.json(); return col.id }
+    const createRes = await fetch(`${CHROMA_URL}/api/v2/tenants/default_tenant/databases/default_database/collections`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: COLLECTION, metadata: { 'hnsw:space': 'cosine' } }),
+    })
+    if (!createRes.ok) throw new Error(`ChromaDB create collection failed: ${await createRes.text()}`)
+    const col = await createRes.json(); return col.id
+  } catch (e) { throw new Error(`getOrCreateCollection failed: ${e instanceof Error ? e.message : e}`) }
 }
 
 async function chromaQuery(collectionId: string, embedding: number[], topK: number) {
-  const res = await fetch(`${CHROMA_URL}/api/v2/tenants/default_tenant/databases/default_database/collections/${collectionId}/query`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      query_embeddings: [embedding],
-      n_results: topK,
-      include: ['documents', 'metadatas', 'distances'],
-    }),
-  })
-  if (!res.ok) throw new Error(`ChromaDB query failed: ${await res.text()}`)
-  return res.json()
+  try {
+    const res = await fetch(`${CHROMA_URL}/api/v2/tenants/default_tenant/databases/default_database/collections/${collectionId}/query`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query_embeddings: [embedding], n_results: topK, include: ['documents', 'metadatas', 'distances'] }),
+    })
+    if (!res.ok) throw new Error(`ChromaDB query failed: ${await res.text()}`)
+    return res.json()
+  } catch (e) { throw new Error(`chromaQuery failed: ${e instanceof Error ? e.message : e}`) }
 }
 
 async function chromaUpsert(collectionId: string, ids: string[], embeddings: number[][], documents: string[], metadatas: Record<string, string>[]) {
-  const res = await fetch(`${CHROMA_URL}/api/v2/tenants/default_tenant/databases/default_database/collections/${collectionId}/upsert`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ids, embeddings, documents, metadatas }),
-  })
-  if (!res.ok) throw new Error(`ChromaDB upsert failed: ${await res.text()}`)
+  try {
+    const res = await fetch(`${CHROMA_URL}/api/v2/tenants/default_tenant/databases/default_database/collections/${collectionId}/upsert`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids, embeddings, documents, metadatas }),
+    })
+    if (!res.ok) throw new Error(`ChromaDB upsert failed: ${await res.text()}`)
+  } catch (e) { throw new Error(`chromaUpsert failed: ${e instanceof Error ? e.message : e}`) }
 }
 
 async function chromaDelete(collectionId: string, ids: string[]) {
-  const res = await fetch(`${CHROMA_URL}/api/v2/tenants/default_tenant/databases/default_database/collections/${collectionId}/delete`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ids }),
-  })
-  if (!res.ok) throw new Error(`ChromaDB delete failed: ${await res.text()}`)
+  try {
+    const res = await fetch(`${CHROMA_URL}/api/v2/tenants/default_tenant/databases/default_database/collections/${collectionId}/delete`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids }),
+    })
+    if (!res.ok) throw new Error(`ChromaDB delete failed: ${await res.text()}`)
+  } catch (e) { throw new Error(`chromaDelete failed: ${e instanceof Error ? e.message : e}`) }
 }
 
 // ── Check ChromaDB is reachable ───────────────────────────────────────────

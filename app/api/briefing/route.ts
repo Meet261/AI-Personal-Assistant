@@ -207,7 +207,9 @@ ${readingNow.length > 0 ? `\nCurrently reading: ${readingNow.map((p: { title: st
 ${energyContext ? `\n${energyContext}` : ''}
 ${momentumContext ? `\n${momentumContext}` : ''}
 
-Write a focused morning briefing in 2-3 paragraphs. Mention the energy peak window and suggest scheduling deep work there. Call out any stalling projects. Then list exactly 3 top priorities for today:
+Write a focused morning briefing in 2-3 short paragraphs. Mention the energy peak window and suggest scheduling deep work there. Call out any stalling projects. Be direct and actionable — no fluff.
+
+Do NOT list the priorities inside the paragraphs. After the paragraphs, output this line exactly once:
 PRIORITIES_JSON: ["priority 1", "priority 2", "priority 3"]`
   } else {
     prompt = `You are a personal productivity assistant. Generate a concise evening summary covering all active areas.
@@ -225,7 +227,9 @@ ${readingNow.length > 0 ? `Research in progress: ${readingNow.map((p: { title: s
 ${energyContext ? `\n${energyContext}` : ''}
 ${momentumContext ? `\n${momentumContext}` : ''}
 
-Write a brief encouraging evening summary (2 paragraphs). Note any stalling projects and suggest tomorrow's energy window for deep work. Then list 3 top priorities for tomorrow:
+Write a brief encouraging evening summary in 2 short paragraphs. Note any stalling projects and suggest tomorrow's energy window for deep work. Be direct and actionable — no fluff.
+
+Do NOT list the priorities inside the paragraphs. After the paragraphs, output this line exactly once:
 PRIORITIES_JSON: ["priority 1", "priority 2", "priority 3"]`
   }
 

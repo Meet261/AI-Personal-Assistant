@@ -7,6 +7,7 @@ const supabase = createClient(
 )
 
 export async function executeHabitAction(action: string, params: Record<string, unknown>) {
+  try {
   switch (action) {
     case 'get_habits': {
       const { data } = await supabase.from('habits').select('*').eq('active', true).order('created_at')
@@ -192,5 +193,10 @@ export async function executeHabitAction(action: string, params: Record<string, 
 
     default:
       return { ok: false, message: `Unknown action: ${action}` }
+  }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`[habit-tracker] ${action} error:`, msg)
+    return { ok: false, message: `Habit tracker error: ${msg}` }
   }
 }

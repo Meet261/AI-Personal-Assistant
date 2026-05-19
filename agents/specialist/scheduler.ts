@@ -8,7 +8,7 @@ const supabase = createClient(
 
 export async function executeSchedulerAction(action: string, params: Record<string, unknown>) {
   const today = new Date().toISOString().slice(0, 10)
-
+  try {
   switch (action) {
     case 'get_week_view': {
       const weekEnd = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
@@ -73,5 +73,10 @@ export async function executeSchedulerAction(action: string, params: Record<stri
 
     default:
       return { ok: false, message: `Unknown action: ${action}` }
+  }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`[scheduler] ${action} error:`, msg)
+    return { ok: false, message: `Scheduler error: ${msg}` }
   }
 }

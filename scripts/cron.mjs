@@ -153,52 +153,76 @@ async function sendEmail(subject, htmlBody) {
   console.log(`[cron] Email sent → ${NOTIFY_EMAIL}`)
 }
 
-// ── Build HTML email ─────────────────────────────────────────────────────────
+// ── Build HTML email — matches the UI layout exactly ─────────────────────────
 function buildEmailHtml(type, date, content, priorities) {
-  const label    = type === 'morning' ? 'Morning Briefing' : 'Evening Summary'
-  const gradient = type === 'morning'
-    ? 'linear-gradient(135deg,#92400E 0%,#D97706 100%)'
-    : 'linear-gradient(135deg,#1e3a5f 0%,#2563EB 100%)'
-
-  const priorityRows = priorities.map((p, i) => `
-    <tr>
-      <td style="padding:8px 0;vertical-align:top;width:38px">
-        <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:50%;background:#0d9488;color:#fff;font-weight:900;font-size:12px">${i + 1}</span>
-      </td>
-      <td style="padding:8px 0 8px 10px;font-size:14px;line-height:1.5;color:#1a1a1a">${p}</td>
-    </tr>`).join('')
-
-  const paragraphs = content
-    .split('\n\n')
-    .filter(Boolean)
-    .map(p => `<p style="margin:0 0 14px;font-size:14px;line-height:1.7;color:#333">${p}</p>`)
-    .join('')
+  const isMorning = type === 'morning'
+  const label     = isMorning ? 'Morning Briefing' : 'Evening Summary'
+  const icon      = isMorning ? '☀️' : '🌙'
+  const gradient  = isMorning
+    ? 'linear-gradient(135deg,#134e4a 0%,#0d9488 100%)'   // teal — morning
+    : 'linear-gradient(135deg,#1e293b 0%,#334155 100%)'   // dark slate — evening
+  const priorityLabel = isMorning ? 'TOP 3 PRIORITIES TODAY' : 'TOP 3 PRIORITIES TOMORROW'
 
   const displayDate = new Date(date + 'T12:00:00').toLocaleDateString('en-US', {
     weekday: 'long', year: 'numeric', month: 'long', day: 'numeric',
   })
 
+  // Render markdown bold/italic safely
+  function renderMd(text) {
+    return text
+      .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/\*(.+?)\*/g, '<em>$1</em>')
+  }
+
+  const priorityItems = priorities.map((p, i) => `
+    <table cellpadding="0" cellspacing="0" border="0" width="100%" style="margin-bottom:8px;background:#f0fdfa;border-radius:10px;">
+      <tr>
+        <td width="42" style="padding:12px 0 12px 14px;vertical-align:middle;">
+          <table cellpadding="0" cellspacing="0" border="0"><tr><td width="26" height="26" style="width:26px;height:26px;border-radius:13px;background:#0d9488;text-align:center;vertical-align:middle;font-family:Arial,sans-serif;font-size:12px;font-weight:900;color:#ffffff;line-height:26px;">${i + 1}</td></tr></table>
+        </td>
+        <td style="padding:12px 14px 12px 8px;vertical-align:middle;font-family:Lato,Arial,sans-serif;font-size:14px;line-height:1.5;color:#1a1a1a;">${renderMd(p)}</td>
+      </tr>
+    </table>`).join('')
+
+  const paragraphs = content
+    .split('\n\n')
+    .filter(p => p.trim() && !p.startsWith('PRIORITIES_JSON'))
+    .map(p => `<p style="margin:0 0 14px;font-size:14px;line-height:1.75;color:#374151">${renderMd(p)}</p>`)
+    .join('')
+
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="margin:0;padding:0;background:#f0fafa;font-family:Lato,sans-serif">
-  <div style="max-width:600px;margin:32px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08)">
+<body style="margin:0;padding:0;background:#f1f5f9;font-family:Lato,Arial,sans-serif">
+  <div style="max-width:600px;margin:32px auto;background:#fff;border-radius:20px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08)">
+
+    <!-- Header -->
     <div style="background:${gradient};padding:28px 32px;color:#fff">
-      <h1 style="margin:0;font-family:Raleway,sans-serif;font-size:22px;font-weight:900">${label}</h1>
-      <p style="margin:4px 0 0;font-size:13px;opacity:.8">${displayDate}</p>
+      <div style="font-size:28px;margin-bottom:8px">${icon}</div>
+      <h1 style="margin:0;font-family:Raleway,Arial,sans-serif;font-size:24px;font-weight:900;letter-spacing:-0.02em">${label}</h1>
+      <p style="margin:4px 0 0;font-size:13px;opacity:0.75">${displayDate}</p>
     </div>
+
     <div style="padding:28px 32px">
+
+      <!-- Priorities -->
       ${priorities.length ? `
-      <div style="background:#f0fdf4;border-radius:12px;padding:20px 24px;margin-bottom:24px">
-        <p style="margin:0 0 14px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#6b7280">
-          ${type === 'morning' ? 'Top 3 Priorities Today' : 'Top 3 Priorities Tomorrow'}
-        </p>
-        <table style="border-collapse:collapse;width:100%">${priorityRows}</table>
+      <div style="margin-bottom:28px">
+        <p style="margin:0 0 12px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:0.08em;color:#94a3b8">${priorityLabel}</p>
+        ${priorityItems}
       </div>` : ''}
-      <p style="margin:0 0 14px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#6b7280">Full Briefing</p>
+
+      <!-- Divider -->
+      ${priorities.length ? '<div style="border-top:1px solid #f1f5f9;margin-bottom:24px"></div>' : ''}
+
+      <!-- Body -->
       ${paragraphs}
+
     </div>
-    <div style="padding:16px 32px;background:#f9fafb;border-top:1px solid #e5e7eb;text-align:center">
-      <p style="margin:0;font-size:11px;color:#9ca3af">Generated by your Personal Assistant · DeepSeek R1 7b</p>
+
+    <!-- Footer -->
+    <div style="padding:14px 32px;background:#f8fafc;border-top:1px solid #e2e8f0;text-align:center">
+      <p style="margin:0;font-size:11px;color:#94a3b8">Personal Assistant · DeepSeek V3 · ${displayDate}</p>
     </div>
   </div>
 </body></html>`
