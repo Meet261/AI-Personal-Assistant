@@ -368,11 +368,17 @@ Provide:
             const searchData = await searchRes.json()
             if (!searchData.data?.length) continue
 
-            // Pick the result whose title most closely matches (case-insensitive prefix)
+            // Pick the result whose title + year both match (prevents wrong-paper matches)
             const titleLower = paper.title.toLowerCase()
-            const match = searchData.data.find((r: { title: string; paperId: string }) =>
-              r.title && titleLower.startsWith(r.title.toLowerCase().slice(0, 20))
-            ) ?? searchData.data[0]
+            const paperYear = Number(paper.year)
+            type S2Result = { title: string; paperId: string; year?: number }
+            const match = (searchData.data as S2Result[]).find(r => {
+              if (!r.title || !r.paperId) return false
+              const titleMatch = titleLower.includes(r.title.toLowerCase().slice(0, 15)) ||
+                                 r.title.toLowerCase().includes(titleLower.slice(0, 15))
+              const yearMatch = !r.year || !paperYear || Math.abs(r.year - paperYear) <= 1
+              return titleMatch && yearMatch
+            }) ?? null
 
             s2Id = match?.paperId ?? null
             if (s2Id) {
@@ -385,10 +391,28 @@ Provide:
 
       if (!s2Id) return { ok: false, message: `Could not find "${paper.title}" on Semantic Scholar` }
 
+      // If s2Id is a DOI/arXiv identifier (not a hex paperId), resolve it first
+      let resolvedId = s2Id
+      if (s2Id.startsWith('DOI:') || s2Id.startsWith('arXiv:')) {
+        try {
+          const resolveRes = await fetch(
+            `https://api.semanticscholar.org/graph/v1/paper/${encodeURIComponent(s2Id)}?fields=paperId`,
+            { signal: AbortSignal.timeout(10000) }
+          )
+          if (resolveRes.ok) {
+            const resolveData = await resolveRes.json()
+            if (resolveData.paperId) {
+              resolvedId = resolveData.paperId
+              await supabase.from('research_papers').update({ s2_paper_id: resolvedId }).eq('id', paperId)
+            }
+          }
+        } catch { /* use as-is */ }
+      }
+
       // Fetch references (papers this paper cites) and citations (papers that cite this)
       const [refsRes, citedByRes] = await Promise.all([
-        fetch(`https://api.semanticscholar.org/graph/v1/paper/${s2Id}/references?fields=paperId,title,authors,year,venue,citationCount&limit=50`, { signal: AbortSignal.timeout(10000) }),
-        fetch(`https://api.semanticscholar.org/graph/v1/paper/${s2Id}/citations?fields=paperId,title,authors,year,venue,citationCount&limit=50`, { signal: AbortSignal.timeout(10000) }),
+        fetch(`https://api.semanticscholar.org/graph/v1/paper/${resolvedId}/references?fields=paperId,title,authors,year,venue,citationCount&limit=50`, { signal: AbortSignal.timeout(10000) }),
+        fetch(`https://api.semanticscholar.org/graph/v1/paper/${resolvedId}/citations?fields=paperId,title,authors,year,venue,citationCount&limit=50`, { signal: AbortSignal.timeout(10000) }),
       ])
 
       const [refsData, citedByData] = await Promise.all([

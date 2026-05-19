@@ -24,6 +24,32 @@ for (const line of readFileSync(envPath, 'utf8').split('\n')) {
 const APP_URL = 'http://localhost:3000'
 const DELAY_MS = 6000  // 6s between calls — well within S2's 100 req/5min free limit
 
+// Known DOI/arXiv identifiers — pre-seeded to bypass title search for hard-to-find papers
+// S2 resolves these directly without hitting the search rate limit
+const KNOWN_S2_IDENTIFIERS = {
+  'holme2012':            'DOI:10.1016/j.physrep.2012.03.001',
+  'scheffer2009':         'DOI:10.1038/nature08227',
+  'kipf2017':             'arXiv:1609.02907',
+  'kwak2010':             'DOI:10.1145/1772690.1772751',
+  'romero2011':           'DOI:10.1145/1963405.1963503',
+  'narayanan2008':        'DOI:10.1109/SP.2008.33',
+  'arenas2008':           'DOI:10.1016/j.physrep.2008.09.002',
+  'kazemi2020':           'arXiv:2005.07496',
+  'dorogovtsev2008':      'DOI:10.1103/RevModPhys.80.1275',
+  'ferrara2016':          'DOI:10.1145/2818717',
+  'callaway2000':         'DOI:10.1103/PhysRevLett.85.5468',
+  'baumgartner2020':      'arXiv:2001.08435',
+  'milo2002':             'DOI:10.1126/science.298.5594.824',
+  'boyd2012':             'DOI:10.1080/1461670X.2012.664893',
+  'vannes2007':           'DOI:10.1073/pnas.0700657104',
+  'mp779jlta7y7fdwvmjf':  'arXiv:2006.10637',
+  'vaswani2017attention': 'arXiv:1706.03762',
+  'grover2016node2vec':   'arXiv:1607.00653',
+  'nguyen2018ctdne':      'DOI:10.1145/3184558.3191526',
+  'velickovic2018gat':    'arXiv:1710.10903',
+  'hamilton2017graphsage':'arXiv:1706.02216',
+}
+
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }
 
 async function getPapers() {
@@ -36,7 +62,25 @@ async function getPapers() {
   return res.json()
 }
 
+async function seedS2Id(paperId, identifier) {
+  // Pre-store the known S2 identifier so fetch_citations skips the search step
+  const res = await fetch(`${process.env.NEXT_PUBLIC_SUPABASE_URL}/rest/v1/research_papers?id=eq.${paperId}`, {
+    method: 'PATCH',
+    headers: {
+      'apikey': process.env.SUPABASE_SERVICE_KEY,
+      'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ s2_paper_id: identifier }),
+  })
+  return res.ok
+}
+
 async function fetchCitations(paperId) {
+  // Pre-seed known identifier so the API skips unreliable title search
+  const knownId = KNOWN_S2_IDENTIFIERS[paperId]
+  if (knownId) await seedS2Id(paperId, knownId)
+
   const res = await fetch(`${APP_URL}/api/agents/research`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
