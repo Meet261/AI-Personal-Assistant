@@ -20,7 +20,6 @@ export function useAgentChat(agentId: string) {
   const [sessionId, setSessionId] = useState<string | null>(null)
   const [loadingHistory, setLoadingHistory] = useState(true)
   const abortRef = useRef<AbortController | null>(null)
-  // Ref mirror so ensureSession always reads the latest value without stale closure
   const sessionIdRef = useRef<string | null>(null)
   const sessionKey = `agent-session-${agentId}`
 
@@ -29,42 +28,52 @@ export function useAgentChat(agentId: string) {
     setSessionId(sid)
   }
 
-  // ── Load existing session on mount ────────────────────────────────────────
+  // ── Load a specific session by ID ─────────────────────────────────────────
+  const loadSession = useCallback(async (sid: string) => {
+    setLoadingHistory(true)
+    setMessages([])
+    setSession(sid)
+    try {
+      const res = await fetch(`/api/agent-history?mode=messages&session_id=${sid}`)
+      if (res.ok) {
+        const msgs = await res.json()
+        if (Array.isArray(msgs)) {
+          setMessages(msgs.map((m: { id: string; role: string; content: string; tool_results: unknown[] | null; created_at: string }) => ({
+            id: m.id,
+            role: m.role as 'user' | 'assistant',
+            content: m.content,
+            ts: new Date(m.created_at),
+            toolResults: (m.tool_results ?? []) as { ok: boolean; message: string; data?: unknown }[],
+          })))
+        }
+      }
+    } catch { /* ignore */ }
+    localStorage.setItem(sessionKey, JSON.stringify({ sid, agentId }))
+    setLoadingHistory(false)
+  }, [agentId, sessionKey])
+
+  // ── Load most recent session on mount ─────────────────────────────────────
   useEffect(() => {
     sessionIdRef.current = null
     setSessionId(null)
     setMessages([])
     setLoadingHistory(true)
 
-    async function loadSession() {
+    async function init() {
       const saved = localStorage.getItem(sessionKey)
       if (saved) {
         try {
           const { sid } = JSON.parse(saved)
-          const res = await fetch(`/api/agent-history?mode=messages&session_id=${sid}`)
-          if (res.ok) {
-            const msgs = await res.json()
-            if (Array.isArray(msgs) && msgs.length > 0) {
-              setMessages(msgs.map((m: { id: string; role: string; content: string; tool_results: unknown[] | null; created_at: string }) => ({
-                id: m.id,
-                role: m.role as 'user' | 'assistant',
-                content: m.content,
-                ts: new Date(m.created_at),
-                toolResults: (m.tool_results ?? []) as { ok: boolean; message: string; data?: unknown }[],
-              })))
-              setSession(sid)
-              setLoadingHistory(false)
-              return
-            }
-          }
-        } catch { /* stale — start fresh */ }
+          await loadSession(sid)
+          return
+        } catch { /* stale */ }
       }
       setLoadingHistory(false)
     }
-    loadSession()
-  }, [agentId, sessionKey])
+    init()
+  }, [agentId, sessionKey, loadSession])
 
-  // ── Create a new session (ref-based, always sees latest sessionId) ─────────
+  // ── Create a new session ──────────────────────────────────────────────────
   const ensureSession = useCallback(async (): Promise<string> => {
     if (sessionIdRef.current) return sessionIdRef.current
 
@@ -136,23 +145,34 @@ export function useAgentChat(agentId: string) {
         const hint = errMsg.includes('timeout') || errMsg.includes('504') || errMsg.includes('AbortError')
           ? '⚠️ The model took too long to respond. Ollama is running but the request timed out — try again or ask something shorter.'
           : '⚠️ Could not reach the agent. Make sure Ollama is running (`ollama serve`).'
-        setMessages(prev => prev.map(m => m.id === loadingId ? {
-          ...m, content: hint, isLoading: false,
-        } : m))
+        setMessages(prev => prev.map(m => m.id === loadingId ? { ...m, content: hint, isLoading: false } : m))
       }
     } finally {
       setStreaming(false)
     }
   }, [input, messages, streaming, agentId, ensureSession])
 
-  // ── Clear / new chat ──────────────────────────────────────────────────────
-  const clear = useCallback(() => {
+  // ── Start a new blank chat ────────────────────────────────────────────────
+  const newChat = useCallback(() => {
     setMessages([])
     setSession(null)
     localStorage.removeItem(sessionKey)
   }, [sessionKey])
 
+  // ── Delete a session ──────────────────────────────────────────────────────
+  const deleteSession = useCallback(async (sid: string) => {
+    await fetch(`/api/agent-history?session_id=${sid}`, { method: 'DELETE' })
+    if (sessionIdRef.current === sid) newChat()
+  }, [newChat])
+
   const cancel = useCallback(() => abortRef.current?.abort(), [])
 
-  return { messages, input, setInput, send, streaming, clear, cancel, loadingHistory, sessionId }
+  // Keep clear as alias for newChat for backward compat
+  const clear = newChat
+
+  return {
+    messages, input, setInput, send, streaming,
+    clear, newChat, cancel, loadingHistory, sessionId,
+    loadSession, deleteSession,
+  }
 }
