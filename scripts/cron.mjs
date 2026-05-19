@@ -296,14 +296,152 @@ async function runHabitDigest(date) {
   console.log(`[cron] Habit digest: ${data.message}`)
 }
 
+// ── Weekly trading review (Sunday 19:00) ─────────────────────────────────────
+async function runWeeklyTradingReview(date) {
+  const day = new Date().getDay() // 0 = Sunday
+  if (day !== 0) return
+  console.log(`[cron] Running weekly trading review for ${date}…`)
+
+  try {
+    // Generate + store the review
+    const res = await fetch(`${APP_URL}/api/trading/weekly-review`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ weeks_ago: 1 }),
+    })
+    const data = await res.json()
+    if (!data.ok) { console.error(`[cron] Trading review failed: ${data.message}`); return }
+
+    const r = data.data
+    if (!r) { console.log(`[cron] Trading review: ${data.message}`); return }
+
+    console.log(`[cron] ✓ Trading review generated: ${r.total_trades} trades, ${r.win_rate}% WR, $${r.total_pnl} P&L`)
+    await sendEmail(
+      `📊 Weekly Trading Review — ${r.week_start} to ${r.week_end}`,
+      buildTradingReviewEmail(r)
+    )
+  } catch (e) {
+    console.error(`[cron] Weekly trading review failed:`, e.message)
+  }
+}
+
+function buildTradingReviewEmail(r) {
+  const pnlColor  = r.total_pnl >= 0 ? '#16a34a' : '#dc2626'
+  const rrColor   = r.risk_reward >= 1 ? '#16a34a' : '#f59e0b'
+  const wrColor   = r.win_rate >= 55 ? '#16a34a' : r.win_rate >= 45 ? '#f59e0b' : '#dc2626'
+
+  const symbolRows = Object.entries(r.by_symbol ?? {})
+    .sort(([, a], [, b]) => b.pnl - a.pnl)
+    .map(([sym, s]) => `
+      <tr style="border-bottom:1px solid #f3f4f6">
+        <td style="padding:8px 0;font-weight:700;color:#1a1a1a">${sym}</td>
+        <td style="padding:8px 0;text-align:center;color:#6b7280">${s.trades}</td>
+        <td style="padding:8px 0;text-align:center;color:#6b7280">${s.trades ? Math.round(s.wins/s.trades*100) : 0}%</td>
+        <td style="padding:8px 0;text-align:right;font-weight:700;color:${s.pnl >= 0 ? '#16a34a' : '#dc2626'}">$${s.pnl.toFixed(2)}</td>
+      </tr>`).join('')
+
+  const dayRows = Object.entries(r.by_day ?? {})
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, pnl]) => `
+      <tr style="border-bottom:1px solid #f3f4f6">
+        <td style="padding:7px 0;color:#374151">${day}</td>
+        <td style="padding:7px 0;text-align:right;font-weight:700;color:${pnl >= 0 ? '#16a34a' : '#dc2626'}">$${pnl.toFixed(2)}</td>
+      </tr>`).join('')
+
+  const setupRows = Object.entries(r.setup_breakdown ?? {})
+    .sort(([, a], [, b]) => b - a)
+    .map(([s, c]) => `<span style="display:inline-block;margin:3px;padding:3px 10px;border-radius:20px;background:#f0fdf4;border:1px solid #bbf7d0;font-size:12px;color:#15803d">${s} (${c})</span>`)
+    .join('')
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="margin:0;padding:0;background:#f0fafa;font-family:Lato,sans-serif">
+  <div style="max-width:620px;margin:32px auto;background:#fff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,.08)">
+
+    <div style="background:linear-gradient(135deg,#134e4a 0%,#0d9488 100%);padding:28px 32px;color:#fff">
+      <h1 style="margin:0;font-family:Raleway,sans-serif;font-size:22px;font-weight:900">📊 Weekly Trading Review</h1>
+      <p style="margin:4px 0 0;font-size:13px;opacity:.8">${r.week_start} → ${r.week_end}</p>
+    </div>
+
+    <!-- Key metrics -->
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;border-bottom:1px solid #e5e7eb">
+      ${[
+        { label: 'Total P&L',    value: `$${r.total_pnl >= 0 ? '+' : ''}${r.total_pnl.toFixed(2)}`, color: pnlColor },
+        { label: 'Win Rate',     value: `${r.win_rate}%`,   color: wrColor },
+        { label: 'Trades',       value: `${r.wins}W / ${r.losses}L`, color: '#374151' },
+        { label: 'Risk:Reward',  value: `1:${r.risk_reward}`, color: rrColor },
+      ].map(m => `
+        <div style="padding:20px 16px;text-align:center;border-right:1px solid #e5e7eb">
+          <div style="font-size:20px;font-weight:900;color:${m.color};font-family:Raleway,sans-serif">${m.value}</div>
+          <div style="font-size:11px;color:#6b7280;margin-top:4px;text-transform:uppercase;letter-spacing:.05em">${m.label}</div>
+        </div>`).join('')}
+    </div>
+
+    <div style="padding:24px 32px">
+
+      <!-- By symbol -->
+      <p style="margin:0 0 10px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#6b7280">By Symbol</p>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
+        <tr style="border-bottom:2px solid #e5e7eb">
+          <th style="padding:6px 0;text-align:left;font-size:11px;color:#9ca3af;text-transform:uppercase">Symbol</th>
+          <th style="padding:6px 0;text-align:center;font-size:11px;color:#9ca3af;text-transform:uppercase">Trades</th>
+          <th style="padding:6px 0;text-align:center;font-size:11px;color:#9ca3af;text-transform:uppercase">WR</th>
+          <th style="padding:6px 0;text-align:right;font-size:11px;color:#9ca3af;text-transform:uppercase">P&L</th>
+        </tr>
+        ${symbolRows}
+      </table>
+
+      <!-- Daily P&L -->
+      <p style="margin:0 0 10px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#6b7280">Daily P&L</p>
+      <table style="width:100%;border-collapse:collapse;margin-bottom:24px">
+        ${dayRows}
+      </table>
+
+      <!-- Best / Worst -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:24px">
+        <div style="background:#f0fdf4;border-radius:10px;padding:14px 16px;border:1px solid #bbf7d0">
+          <p style="margin:0 0 6px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#15803d">Best Trade</p>
+          <p style="margin:0;font-size:18px;font-weight:900;color:#16a34a">+$${r.best_trade?.profit?.toFixed(2)}</p>
+          <p style="margin:4px 0 0;font-size:12px;color:#374151">${r.best_trade?.symbol} ${r.best_trade?.action} · ${r.best_trade?.time?.slice(0,10)}</p>
+        </div>
+        <div style="background:#fef2f2;border-radius:10px;padding:14px 16px;border:1px solid #fecaca">
+          <p style="margin:0 0 6px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;color:#b91c1c">Worst Trade</p>
+          <p style="margin:0;font-size:18px;font-weight:900;color:#dc2626">$${r.worst_trade?.profit?.toFixed(2)}</p>
+          <p style="margin:4px 0 0;font-size:12px;color:#374151">${r.worst_trade?.symbol} ${r.worst_trade?.action} · ${r.worst_trade?.time?.slice(0,10)}</p>
+        </div>
+      </div>
+
+      <!-- Avg win/loss -->
+      <div style="background:#f9fafb;border-radius:10px;padding:14px 16px;margin-bottom:24px;display:flex;gap:32px">
+        <div><p style="margin:0;font-size:11px;color:#6b7280;text-transform:uppercase">Avg Win</p><p style="margin:4px 0 0;font-size:16px;font-weight:900;color:#16a34a">+$${r.avg_win?.toFixed(2)}</p></div>
+        <div><p style="margin:0;font-size:11px;color:#6b7280;text-transform:uppercase">Avg Loss</p><p style="margin:4px 0 0;font-size:16px;font-weight:900;color:#dc2626">$${r.avg_loss?.toFixed(2)}</p></div>
+        <div><p style="margin:0;font-size:11px;color:#6b7280;text-transform:uppercase">R:R Ratio</p><p style="margin:4px 0 0;font-size:16px;font-weight:900;color:${rrColor}">1:${r.risk_reward}</p></div>
+      </div>
+
+      <!-- Setup breakdown -->
+      ${setupRows ? `
+      <p style="margin:0 0 8px;font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.08em;color:#6b7280">Setup Types</p>
+      <div style="margin-bottom:8px">${setupRows}</div>` : ''}
+
+    </div>
+
+    <div style="padding:16px 32px;background:#f9fafb;border-top:1px solid #e5e7eb;text-align:center">
+      <p style="margin:0;font-size:11px;color:#9ca3af">Generated by your Personal Assistant · Weekly Trading Review</p>
+    </div>
+  </div>
+</body></html>`
+}
+
 // ── Start ────────────────────────────────────────────────────────────────────
 console.log('[cron] Scheduler started')
-console.log('[cron]   Morning briefing:        first open 06:00–12:00')
-console.log('[cron]   Evening summary:         first open after 18:00')
-console.log('[cron]   Nightly scheduler cron:  21:00 daily')
-console.log('[cron]   Weekly habit digest:     20:00 Sunday')
+console.log('[cron]   Morning briefing:          first open 06:00–12:00')
+console.log('[cron]   Evening summary:           first open after 18:00')
+console.log('[cron]   Nightly scheduler cron:    21:00 daily')
+console.log('[cron]   Weekly habit digest:       20:00 Sunday')
+console.log('[cron]   Weekly trading review:     19:00 Sunday')
 
-scheduleWindow(6,  12, 'Morning Briefing',               date => runBriefing('morning', date))
-scheduleWindow(18, 24, 'Evening Summary',                date => runBriefing('evening', date))
-scheduleDaily(21,  0,  'Nightly Scheduler + Cascade',    date => runNightlyScheduler(date))
-scheduleDaily(20,  0,  'Weekly Habit Digest',            date => runHabitDigest(date))
+scheduleWindow(6,  12, 'Morning Briefing',                date => runBriefing('morning', date))
+scheduleWindow(18, 24, 'Evening Summary',                 date => runBriefing('evening', date))
+scheduleDaily(21,  0,  'Nightly Scheduler + Cascade',     date => runNightlyScheduler(date))
+scheduleDaily(20,  0,  'Weekly Habit Digest',             date => runHabitDigest(date))
+scheduleDaily(19,  0,  'Weekly Trading Review',           date => runWeeklyTradingReview(date))
