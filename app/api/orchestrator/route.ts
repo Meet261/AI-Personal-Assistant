@@ -36,7 +36,7 @@ const AGENT_TOOL_ALLOWLIST: Record<string, string[]> = {
   memory:         ['save','recall','forget','get_summary','list','debug_code','extract_from_conversation'],
   email:          ['get_unread_count','fetch_inbox','read_email','triage_inbox','summarize_email','draft_reply','send_email','send_reply','search_emails'],
   'paper-digester':['digest_one','digest_all','get_jobs','extract_arguments_for','get_undigested'],
-  research:       ['list_research_projects','list_papers','search_papers','get_paper_details','list_highlights','get_reading_stats','draft_section','outline_chapter','improve_paragraph','find_citations_for','fetch_citations','get_citations','find_foundational_papers'],
+  research:       ['list_research_projects','list_papers','search_papers','get_paper_details','list_highlights','get_reading_stats','draft_section','outline_chapter','improve_paragraph','find_citations_for','fetch_citations','get_citations','find_foundational_papers','find_contradictions','find_citation_gaps'],
 }
 
 // ── Dispatch a single tool call to the right executor ────────────────────
@@ -128,8 +128,20 @@ async function preflight(
   else if (agentId === 'research') {
     type PaperRow = { id: string; title: string; authors: string; year: number; tags: string[]; summary: string | null; dissertation_relevance: number | null; reading_status: string }
 
+    // Contradiction detector
+    if (/contradict|conflict|disagree|opposing|tension between|papers disagree/i.test(m)) {
+      const result = await executeResearchAction('find_contradictions', {})
+      agentData = { data: result.data, summary: result.message }
+    }
+
+    // Citation gap finder
+    else if (/citation gap|missing paper|not in (my )?library|foundational.*missing|gap.*citat/i.test(m)) {
+      const result = await executeResearchAction('find_citation_gaps', {})
+      agentData = { data: result.data, summary: result.message }
+    }
+
     // For questions about a specific paper's details/methodology/arguments: fetch full paper record
-    if (/methodology|main.?claim|argument|limitation|finding|contribution|from the .+paper|paper.{0,30}(watts|dakos|romero|baumgartner|velickovic|milo|lazer|dorogovtsev)/i.test(m)) {
+    else if (/methodology|main.?claim|argument|limitation|finding|contribution|from the .+paper|paper.{0,30}(watts|dakos|romero|baumgartner|velickovic|milo|lazer|dorogovtsev)/i.test(m)) {
       const detailResult = await executeResearchAction('get_paper_details', { query: userMessage })
       if (detailResult.ok && detailResult.data) {
         agentData = {

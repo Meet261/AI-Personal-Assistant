@@ -238,6 +238,102 @@ Provide:
       }
     }
 
+    // ── Contradiction detector — find pairs with conflicting claims ───────
+    case 'find_contradictions': {
+      const { data: papers } = await supabase
+        .from('research_papers')
+        .select('id,title,authors,year,main_claim,methodology,limitations')
+        .not('main_claim', 'is', null)
+        .limit(50)
+
+      if (!papers?.length) return { ok: true, message: 'No papers with extracted arguments yet — run digest first', data: [] }
+
+      // Build contradiction pairs by looking for opposing keywords in main_claim
+      const contradictKeywords = [
+        ['increase', 'decrease'], ['positive', 'negative'], ['significant', 'insignificant'],
+        ['improves', 'degrades'], ['effective', 'ineffective'], ['stable', 'unstable'],
+        ['linear', 'nonlinear'], ['static', 'dynamic'], ['homogeneous', 'heterogeneous'],
+        ['converges', 'diverges'], ['robust', 'brittle'],
+      ]
+
+      const pairs: { paper_a: { id: string; title: string; authors: string; year: number; claim: string }; paper_b: { id: string; title: string; authors: string; year: number; claim: string }; tension: string }[] = []
+
+      for (let i = 0; i < papers.length; i++) {
+        for (let j = i + 1; j < papers.length; j++) {
+          const a = papers[i]
+          const b = papers[j]
+          if (!a.main_claim || !b.main_claim) continue
+
+          const claimA = a.main_claim.toLowerCase()
+          const claimB = b.main_claim.toLowerCase()
+
+          for (const [word1, word2] of contradictKeywords) {
+            const aHas1 = claimA.includes(word1), aHas2 = claimA.includes(word2)
+            const bHas1 = claimB.includes(word1), bHas2 = claimB.includes(word2)
+
+            if ((aHas1 && bHas2) || (aHas2 && bHas1)) {
+              const tension = aHas1 ? `"${word1}" vs "${word2}"` : `"${word2}" vs "${word1}"`
+              pairs.push({
+                paper_a: { id: a.id, title: a.title, authors: a.authors?.split(',')[0] ?? '', year: a.year, claim: a.main_claim.slice(0, 120) },
+                paper_b: { id: b.id, title: b.title, authors: b.authors?.split(',')[0] ?? '', year: b.year, claim: b.main_claim.slice(0, 120) },
+                tension,
+              })
+              break
+            }
+          }
+        }
+      }
+
+      pairs.sort((a, b) => 0 - 0) // keep insertion order
+      const top = pairs.slice(0, 10)
+
+      return {
+        ok: true,
+        message: `${top.length} potential contradictions found across ${papers.length} papers with extracted arguments`,
+        data: top,
+      }
+    }
+
+    // ── Citation gap finder — foundational papers not in your library ──────
+    case 'find_citation_gaps': {
+      // Find papers referenced by 3+ of your papers but not in your library
+      const { data: citations } = await supabase
+        .from('paper_citations')
+        .select('external_id,title,authors,year,citation_count')
+        .eq('relation', 'cites')
+        .not('external_id', 'is', null)
+        .order('citation_count', { ascending: false })
+
+      if (!citations?.length) return { ok: true, message: 'No citation data yet — run fetch_citations on your papers first', data: [] }
+
+      // Count how many of your papers cite each external paper
+      const counts: Record<string, { title: string; authors: string; year: number; citation_count: number; cited_by: number }> = {}
+      for (const c of citations) {
+        if (!c.external_id || !c.title) continue
+        if (!counts[c.external_id]) {
+          counts[c.external_id] = { title: c.title, authors: c.authors ?? '', year: c.year, citation_count: c.citation_count ?? 0, cited_by: 0 }
+        }
+        counts[c.external_id].cited_by++
+      }
+
+      // Get all paper titles already in library for dedup
+      const { data: library } = await supabase.from('research_papers').select('title')
+      const libraryTitles = new Set((library ?? []).map(p => p.title?.toLowerCase().slice(0, 40)))
+
+      // Threshold: cited by 2+ when we have enough data, otherwise 1
+      const minCitedBy = Object.values(counts).some(p => p.cited_by >= 2) ? 2 : 1
+      const gaps = Object.values(counts)
+        .filter(p => p.cited_by >= minCitedBy && !libraryTitles.has(p.title.toLowerCase().slice(0, 40)))
+        .sort((a, b) => b.cited_by - a.cited_by || b.citation_count - a.citation_count)
+        .slice(0, 15)
+
+      return {
+        ok: true,
+        message: `${gaps.length} foundational papers cited by 2+ of your papers but not in your library`,
+        data: gaps,
+      }
+    }
+
     // ── Citation graph — fetch via Semantic Scholar API ───────────────────
     case 'fetch_citations': {
       // params: paper_id (uuid) — fetch references + citations from Semantic Scholar
@@ -255,14 +351,35 @@ Provide:
       // Find Semantic Scholar ID by title search if not stored
       let s2Id = paper.s2_paper_id as string | null
       if (!s2Id) {
-        const searchUrl = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(paper.title)}&fields=paperId,title,year&limit=1`
-        const searchRes = await fetch(searchUrl, { signal: AbortSignal.timeout(10000) })
-        if (searchRes.ok) {
-          const searchData = await searchRes.json()
-          s2Id = searchData.data?.[0]?.paperId ?? null
-          if (s2Id) {
-            await supabase.from('research_papers').update({ s2_paper_id: s2Id }).eq('id', paperId)
-          }
+        // Try progressively: full title, then title + first author, then first 6 words
+        const firstAuthor = (paper.authors ?? '').split(/[,;]/)[0].trim().split(' ').pop() ?? ''
+        const shortTitle = paper.title.split(' ').slice(0, 6).join(' ')
+        const queries = [
+          paper.title,
+          firstAuthor ? `${shortTitle} ${firstAuthor}` : null,
+          shortTitle,
+        ].filter(Boolean) as string[]
+
+        for (const query of queries) {
+          const searchUrl = `https://api.semanticscholar.org/graph/v1/paper/search?query=${encodeURIComponent(query)}&fields=paperId,title,year&limit=3`
+          try {
+            const searchRes = await fetch(searchUrl, { signal: AbortSignal.timeout(10000) })
+            if (!searchRes.ok) continue
+            const searchData = await searchRes.json()
+            if (!searchData.data?.length) continue
+
+            // Pick the result whose title most closely matches (case-insensitive prefix)
+            const titleLower = paper.title.toLowerCase()
+            const match = searchData.data.find((r: { title: string; paperId: string }) =>
+              r.title && titleLower.startsWith(r.title.toLowerCase().slice(0, 20))
+            ) ?? searchData.data[0]
+
+            s2Id = match?.paperId ?? null
+            if (s2Id) {
+              await supabase.from('research_papers').update({ s2_paper_id: s2Id }).eq('id', paperId)
+              break
+            }
+          } catch { continue }
         }
       }
 
