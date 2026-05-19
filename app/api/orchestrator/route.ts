@@ -24,8 +24,28 @@ const supabase = createClient(
 
 const TOOL_REGEX = /```tool\s*([\s\S]*?)```/g
 
+// ── Per-agent tool allowlists — agents can only call their own actions ────
+const AGENT_TOOL_ALLOWLIST: Record<string, string[]> = {
+  assistant:      ['add_task','add_project','add_project_with_tasks','bulk_add_tasks','list_tasks','list_projects','update_task_status','update_task','delete_task','delete_project','create_meeting','get_meetings','get_past_meetings','capture_meeting_notes','extract_action_items','prep_meeting_brief'],
+  trading:        ['get_risk_state','get_recent_trades','get_today_trades','get_performance_summary','get_recent_predictions'],
+  journal:        ['get_today_entry','save_entry','get_energy_pattern','get_recent_entries','log_health'],
+  scheduler:      ['get_week_view','get_overdue','get_alerts','dismiss_alert','dismiss_all_alerts','schedule_task','create_event'],
+  'habit-tracker':['get_habits','create_habit','update_habit','delete_habit','get_grid','toggle_today','log_habit','get_streaks','get_weekly_summary','send_weekly_digest'],
+  knowledge:      ['search_knowledge','embed_paper','embed_all_papers','status','reindex'],
+  memory:         ['save','recall','forget','get_summary','list','debug_code','extract_from_conversation'],
+  email:          ['get_unread_count','fetch_inbox','read_email','triage_inbox','summarize_email','draft_reply','send_email','send_reply','search_emails'],
+  'paper-digester':['digest_one','digest_all','get_jobs'],
+  research:       ['list_research_projects','list_papers','search_papers','get_paper_details','list_highlights','get_reading_stats','draft_section','outline_chapter','improve_paragraph','find_citations_for'],
+}
+
 // ── Dispatch a single tool call to the right executor ────────────────────
 async function dispatchTool(agentId: AgentId, action: string, params: Record<string, unknown>) {
+  // Allowlist check — agent can only call its own actions
+  const allowed = AGENT_TOOL_ALLOWLIST[agentId]
+  if (allowed && !allowed.includes(action)) {
+    console.warn(`[tool-governance] ${agentId} attempted disallowed action: ${action}`)
+    return { ok: false, message: `Action "${action}" is not permitted for ${agentId} agent` }
+  }
   switch (agentId) {
     case 'assistant':      return executeAssistantAction(action, params)
     case 'research':       return executeResearchAction(action, params)
@@ -312,6 +332,12 @@ export async function POST(req: NextRequest) {
     return res.ok !== undefined ? `${res.ok ? '✓' : '✗'} ${res.message?.slice(0, 60)}` : String(r).slice(0, 60)
   })
 
+  // Estimate V3 cost: ~1050 input + 80 output tokens per tool call at $0.27/$1.10 per M
+  const v3Used = !!process.env.DEEPSEEK_API_KEY && allToolResults.length > 0
+  const estimatedCostUsd = v3Used
+    ? Number(((1050 * 0.27 + 80 * 1.10) / 1_000_000 * allToolResults.length).toFixed(6))
+    : 0
+
   const persistOps = [
     supabase.from('agent_intent_log').insert({
       user_message: userMessage.slice(0, 500),
@@ -324,6 +350,9 @@ export async function POST(req: NextRequest) {
       tool_results_ok: allToolResults.map(r => (r as { ok?: boolean }).ok ?? true),
       reply_length: finalReply.length,
       duration_ms: durationMs,
+      model_used: modelForAgent(intent.primaryAgent),
+      v3_used: v3Used,
+      estimated_cost_usd: estimatedCostUsd,
     }).then(() => {}),
   ]
 
