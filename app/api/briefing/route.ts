@@ -9,93 +9,77 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 )
 
-const OLLAMA_BASE = 'http://localhost:11434'
+const DEEPSEEK_API_URL = 'https://api.deepseek.com/chat/completions'
 
-// Stream from Ollama and pipe tokens to a ReadableStream
-function streamBriefing(prompt: string, model: string): ReadableStream<Uint8Array> {
+// Generate briefing via DeepSeek V3 (fast ~3-5s, cheap ~$0.001/briefing)
+// Falls back to Ollama if DEEPSEEK_API_KEY is not set
+async function generateBriefing(prompt: string): Promise<{ content: string; top_priorities: string[] }> {
+  const apiKey = process.env.DEEPSEEK_API_KEY
+
+  if (apiKey) {
+    const res = await fetch(DEEPSEEK_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        model: 'deepseek-chat',
+        messages: [
+          { role: 'system', content: 'You are a concise, professional productivity assistant. Be direct and actionable.' },
+          { role: 'user', content: prompt },
+        ],
+        temperature: 0.4,
+        max_tokens: 800,
+      }),
+      signal: AbortSignal.timeout(30000),
+    })
+    if (!res.ok) throw new Error(`DeepSeek API error: ${res.status}`)
+    const data = await res.json()
+    const raw = data.choices?.[0]?.message?.content ?? ''
+    const jsonMatch = raw.match(/PRIORITIES_JSON:\s*(\[[\s\S]*?\])/)
+    const top_priorities: string[] = jsonMatch ? JSON.parse(jsonMatch[1]) : []
+    const content = raw.replace(/PRIORITIES_JSON:[\s\S]*$/, '').trim()
+    return { content, top_priorities }
+  }
+
+  // Fallback: Ollama R1
+  const res = await fetch('http://localhost:11434/api/chat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'deepseek-r1:7b',
+      messages: [
+        { role: 'system', content: 'You are a concise, professional productivity assistant. Be direct and actionable.' },
+        { role: 'user', content: prompt },
+      ],
+      stream: false,
+    }),
+    signal: AbortSignal.timeout(120000),
+  })
+  if (!res.ok) throw new Error('Ollama error')
+  const data = await res.json()
+  const raw = (data.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+  const jsonMatch = raw.match(/PRIORITIES_JSON:\s*(\[[\s\S]*?\])/)
+  const top_priorities: string[] = jsonMatch ? JSON.parse(jsonMatch[1]) : []
+  const content = raw.replace(/PRIORITIES_JSON:[\s\S]*$/, '').trim()
+  return { content, top_priorities }
+}
+
+// Wrap in SSE stream so existing client code works unchanged
+function streamBriefing(prompt: string): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
-
   return new ReadableStream({
     async start(controller) {
-      let full = ''
-      let thinkBuf = ''
-      let inThink = false
-
       try {
-        const res = await fetch(`${OLLAMA_BASE}/api/chat`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            model,
-            messages: [
-              { role: 'system', content: 'You are a concise, professional productivity assistant. Be direct and actionable.' },
-              { role: 'user', content: prompt },
-            ],
-            stream: true,
-          }),
-        })
-
-        if (!res.ok) {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: 'Ollama error' })}\n\n`))
-          controller.close()
-          return
+        const { content, top_priorities } = await generateBriefing(prompt)
+        // Stream content word-by-word for a typing effect
+        const words = content.split(' ')
+        for (let i = 0; i < words.length; i++) {
+          const token = (i === 0 ? '' : ' ') + words[i]
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify({ token })}\n\n`))
         }
-
-        const reader = res.body!.getReader()
-        const decoder = new TextDecoder()
-        let streamBuf = ''  // buffer for incomplete JSON lines
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-
-          streamBuf += decoder.decode(value, { stream: true })
-          const rawLines = streamBuf.split('\n')
-          streamBuf = rawLines.pop() ?? '' // keep incomplete last line
-          const lines = rawLines.filter(Boolean)
-          for (const line of lines) {
-            try {
-              const json = JSON.parse(line)
-              const chunk: string = json.message?.content || ''
-              if (!chunk) continue
-
-              full += chunk
-
-              // Filter out <think>...</think> before streaming to client
-              let visible = ''
-              for (const char of chunk) {
-                if (inThink) {
-                  thinkBuf += char
-                  if (thinkBuf.endsWith('</think>')) { inThink = false; thinkBuf = '' }
-                } else {
-                  if ((thinkBuf + char).includes('<think>')) {
-                    inThink = true
-                    thinkBuf += char
-                  } else {
-                    visible += char
-                  }
-                }
-              }
-
-              if (visible) {
-                controller.enqueue(encoder.encode(`data: ${JSON.stringify({ token: visible })}\n\n`))
-              }
-            } catch { /* skip malformed JSON */ }
-          }
-        }
-
-        // Extract priorities from full response and send as final event
-        const clean = full.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
-        const jsonMatch = clean.match(/PRIORITIES_JSON:\s*(\[[\s\S]*?\])/)
-        const top_priorities: string[] = jsonMatch ? JSON.parse(jsonMatch[1]) : []
-        const content = clean.replace(/PRIORITIES_JSON:[\s\S]*$/, '').trim()
-
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ done: true, content, top_priorities })}\n\n`))
-
       } catch (err) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify({ error: String(err) })}\n\n`))
       }
-
       controller.close()
     },
   })
@@ -245,10 +229,7 @@ Write a brief encouraging evening summary (2 paragraphs). Note any stalling proj
 PRIORITIES_JSON: ["priority 1", "priority 2", "priority 3"]`
   }
 
-  // Use 7b — 4-5x faster than 32b with streaming, quality is sufficient for briefings
-  const model = 'deepseek-r1:7b'
-
-  const stream = streamBriefing(prompt, model)
+  const stream = streamBriefing(prompt)
 
   // After streaming completes we need to save to DB — we do this by wrapping the stream
   // and intercepting the done event on the client side via a separate save call.
