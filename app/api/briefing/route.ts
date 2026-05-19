@@ -101,21 +101,80 @@ function streamBriefing(prompt: string, model: string): ReadableStream<Uint8Arra
   })
 }
 
+// ── P2-C: Derive energy peak window from last 14 days of journal entries ──
+function buildEnergyContext(entries: { date: string; energy_level: number | null }[]): string {
+  if (!entries.length) return ''
+  const avg = entries.reduce((s, e) => s + (e.energy_level ?? 3), 0) / entries.length
+  const trend = entries.length >= 3
+    ? (entries.slice(-3).reduce((s, e) => s + (e.energy_level ?? 3), 0) / 3) - avg
+    : 0
+  const last = entries[entries.length - 1]?.energy_level ?? avg
+  // Map energy level to suggested schedule
+  let peakWindow = '9–11 AM'
+  let avoidWindow = '2–4 PM'
+  if (avg >= 4) { peakWindow = '8–11 AM'; avoidWindow = '3–5 PM' }
+  else if (avg < 2.5) { peakWindow = '10 AM–12 PM'; avoidWindow = '1–4 PM' }
+  const trendNote = trend > 0.3 ? 'Energy trending up lately.' : trend < -0.3 ? 'Energy trending down — protect your schedule.' : ''
+  return `Energy pattern (14-day avg ${avg.toFixed(1)}/5, yesterday ${last}/5): Peak focus window is ${peakWindow}. Save deep work for then. Avoid draining meetings in ${avoidWindow}. ${trendNote}`.trim()
+}
+
+// ── P2-D: Compute project momentum — flag stalled projects ────────────────
+function buildMomentumContext(
+  projects: { id: string; name: string; updated_at: string }[],
+  tasks: { project_id?: string; updated_at?: string; status: string }[],
+  targetDate: string
+): string {
+  if (!projects.length) return ''
+  const now = new Date(targetDate)
+  const lines: string[] = []
+
+  for (const proj of projects) {
+    const projTasks = tasks.filter(t => t.project_id === proj.id && t.status !== 'done')
+    if (!projTasks.length) continue
+
+    // Most recent task activity for this project
+    const lastActivity = projTasks
+      .map(t => t.updated_at ? new Date(t.updated_at) : new Date(0))
+      .sort((a, b) => b.getTime() - a.getTime())[0]
+
+    const daysSince = Math.floor((now.getTime() - lastActivity.getTime()) / 86_400_000)
+
+    if (daysSince >= 7) {
+      lines.push(`⚠️ ${proj.name}: no activity for ${daysSince} days — at risk of stalling`)
+    } else if (daysSince >= 4) {
+      lines.push(`⚡ ${proj.name}: ${daysSince} days since last task update`)
+    }
+  }
+
+  return lines.length ? `Project momentum:\n${lines.join('\n')}` : ''
+}
+
 export async function POST(req: NextRequest) {
   const { type, date } = await req.json()
   const targetDate = date || format(new Date(), 'yyyy-MM-dd')
 
-  const [tasksRes, projectsRes, journalRes, researchRes] = await Promise.all([
-    supabase.from('tasks').select('title,priority,effort,deadline,scheduled_for,project:projects(name)').neq('status', 'done').order('priority'),
-    supabase.from('projects').select('name').eq('status', 'active'),
+  // P2-C: fetch 14-day energy history alongside existing queries
+  const since14 = format(new Date(Date.now() - 14 * 86_400_000), 'yyyy-MM-dd')
+
+  const [tasksRes, projectsRes, journalRes, researchRes, energyRes] = await Promise.all([
+    supabase.from('tasks').select('id,title,priority,effort,deadline,scheduled_for,status,updated_at,project_id,project:projects(name)').neq('status', 'done').order('priority'),
+    supabase.from('projects').select('id,name,updated_at').eq('status', 'active'),
     supabase.from('journal_entries').select('*').eq('date', targetDate).single(),
     supabase.from('research_papers').select('title,reading_status').eq('reading_status', 'reading').limit(5),
+    supabase.from('journal_entries').select('date,energy_level').gte('date', since14).order('date'),
   ])
 
   const tasks = tasksRes.data || []
   const projects = projectsRes.data || []
   const journal = journalRes.data
   const readingNow = researchRes.data || []
+  const energyHistory = energyRes.data || []
+
+  // P2-C: energy-aware scheduling context
+  const energyContext = buildEnergyContext(energyHistory)
+
+  // P2-D: project momentum radar
+  const momentumContext = buildMomentumContext(projects, tasks, targetDate)
 
   // Trading context from CSV + risk state
   let tradingContext = ''
@@ -161,8 +220,10 @@ Overdue (${overdue.length}):
 ${overdue.map((t: { title: string; deadline?: string }) => `- ${t.title} (was due: ${t.deadline})`).join('\n') || 'None'}
 ${tradingContext ? `\nTrading Agent: ${tradingContext}` : ''}
 ${readingNow.length > 0 ? `\nCurrently reading: ${readingNow.map((p: { title: string }) => p.title).join(', ')}` : ''}
+${energyContext ? `\n${energyContext}` : ''}
+${momentumContext ? `\n${momentumContext}` : ''}
 
-Write a brief, motivating morning briefing in 2-3 paragraphs covering tasks, research, and trading. Then list exactly 3 top priorities for today:
+Write a focused morning briefing in 2-3 paragraphs. Mention the energy peak window and suggest scheduling deep work there. Call out any stalling projects. Then list exactly 3 top priorities for today:
 PRIORITIES_JSON: ["priority 1", "priority 2", "priority 3"]`
   } else {
     prompt = `You are a personal productivity assistant. Generate a concise evening summary covering all active areas.
@@ -177,8 +238,10 @@ ${journal ? `Evening check-in:
 Open tasks: ${tasks.length} remaining. Urgent: ${urgent.map((t: { title: string }) => t.title).join(', ') || 'none'}
 ${tradingContext ? `Trading today: ${tradingContext}` : ''}
 ${readingNow.length > 0 ? `Research in progress: ${readingNow.map((p: { title: string }) => p.title).join(', ')}` : ''}
+${energyContext ? `\n${energyContext}` : ''}
+${momentumContext ? `\n${momentumContext}` : ''}
 
-Write a brief encouraging evening summary (2 paragraphs) covering tasks, research progress, and trading. Then list 3 top priorities for tomorrow:
+Write a brief encouraging evening summary (2 paragraphs). Note any stalling projects and suggest tomorrow's energy window for deep work. Then list 3 top priorities for tomorrow:
 PRIORITIES_JSON: ["priority 1", "priority 2", "priority 3"]`
   }
 
