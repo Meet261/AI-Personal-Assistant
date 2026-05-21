@@ -115,7 +115,6 @@ export async function executeMemoryAction(action: string, params: Record<string,
 
       if (!data?.length) return { ok: true, message: 'No memories stored yet', data: {} }
 
-      // Group by agent
       const grouped: Record<string, { key: string; value: string }[]> = {}
       for (const m of data) {
         if (!grouped[m.agent_id]) grouped[m.agent_id] = []
@@ -123,6 +122,38 @@ export async function executeMemoryAction(action: string, params: Record<string,
       }
 
       return { ok: true, message: `${data.length} total memories across ${Object.keys(grouped).length} agents`, data: grouped }
+    }
+
+    // ── Audit — all facts with full date metadata for the audit screen ────
+    case 'get_audit': {
+      const { data } = await supabase
+        .from('agent_memory')
+        .select('agent_id,key,value,created_at,updated_at')
+        .in('agent_id', ALL_AGENT_IDS)
+        .order('updated_at', { ascending: true }) // stalest first
+        .limit(200)
+
+      if (!data?.length) return { ok: true, message: 'No memories stored yet', data: [] }
+
+      const now = Date.now()
+      const facts = data.map(m => {
+        const updatedMs = new Date(m.updated_at).getTime()
+        const createdMs = new Date(m.created_at).getTime()
+        const daysSinceUpdate = Math.floor((now - updatedMs) / 86400000)
+        const daysSinceCreate = Math.floor((now - createdMs) / 86400000)
+        return {
+          agent_id: m.agent_id,
+          key: m.key,
+          value: m.value,
+          created_at: m.created_at?.slice(0, 10),
+          updated_at: m.updated_at?.slice(0, 10),
+          days_since_update: daysSinceUpdate,
+          days_since_create: daysSinceCreate,
+          stale: daysSinceUpdate > 30,
+        }
+      })
+
+      return { ok: true, message: `${facts.length} facts audited`, data: facts }
     }
 
     // ── Extract — run memory extraction over a conversation ───────────────
