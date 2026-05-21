@@ -34,9 +34,9 @@ async function generateBriefing(prompt: string): Promise<{ content: string; top_
     if (!res.ok) throw new Error(`DeepSeek API error: ${res.status}`)
     const data = await res.json()
     const raw = data.choices?.[0]?.message?.content ?? ''
-    const jsonMatch = raw.match(/PRIORITIES_JSON:\s*(\[[\s\S]*?\])/)
+    const jsonMatch = raw.match(/PLAN_JSON:\s*(\[[\s\S]*?\])/)
     const top_priorities: string[] = jsonMatch ? JSON.parse(jsonMatch[1]) : []
-    const content = raw.replace(/PRIORITIES_JSON:[\s\S]*$/, '').trim()
+    const content = raw.replace(/PLAN_JSON:[\s\S]*$/, '').trim()
     return { content, top_priorities }
   }
 
@@ -57,9 +57,9 @@ async function generateBriefing(prompt: string): Promise<{ content: string; top_
   if (!res.ok) throw new Error('Ollama error')
   const data = await res.json()
   const raw = (data.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '').trim()
-  const jsonMatch = raw.match(/PRIORITIES_JSON:\s*(\[[\s\S]*?\])/)
+  const jsonMatch = raw.match(/PLAN_JSON:\s*(\[[\s\S]*?\])/)
   const top_priorities: string[] = jsonMatch ? JSON.parse(jsonMatch[1]) : []
-  const content = raw.replace(/PRIORITIES_JSON:[\s\S]*$/, '').trim()
+  const content = raw.replace(/PLAN_JSON:[\s\S]*$/, '').trim()
   return { content, top_priorities }
 }
 
@@ -217,8 +217,8 @@ ${momentumContext ? `\n${momentumContext}` : ''}
 
 Write a focused morning briefing in 2-3 short paragraphs. Mention the energy peak window and suggest scheduling deep work there. Call out any stalling projects. Be direct and actionable — no fluff.
 
-Do NOT list the priorities inside the paragraphs. After the paragraphs, output this line exactly once:
-PRIORITIES_JSON: ["priority 1", "priority 2", "priority 3"]`
+Do NOT list the tasks inside the paragraphs. After the paragraphs, output an ordered execution plan — exactly 3 items ranked by what to do first. Each item must include the task AND a one-phrase reason for the ordering (e.g. energy window, deadline, unblocks other work). Output this line exactly once:
+PLAN_JSON: ["Task A — reason why first", "Task B — reason why second", "Task C — reason why third"]`
   } else {
     prompt = `You are a personal productivity assistant. Generate a concise evening summary covering all active areas.
 
@@ -237,8 +237,8 @@ ${momentumContext ? `\n${momentumContext}` : ''}
 
 Write a brief encouraging evening summary in 2 short paragraphs. Note any stalling projects and suggest tomorrow's energy window for deep work. Be direct and actionable — no fluff.
 
-Do NOT list the priorities inside the paragraphs. After the paragraphs, output this line exactly once:
-PRIORITIES_JSON: ["priority 1", "priority 2", "priority 3"]`
+Do NOT list the tasks inside the paragraphs. After the paragraphs, output an ordered plan for tomorrow — exactly 3 items ranked by what to tackle first, each with a one-phrase reason. Output this line exactly once:
+PLAN_JSON: ["Task A — reason why first", "Task B — reason why second", "Task C — reason why third"]`
   }
 
   const { content, top_priorities } = await generateAndSaveBriefing(prompt, targetDate, type)

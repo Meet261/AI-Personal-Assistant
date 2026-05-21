@@ -75,14 +75,20 @@ export default function EveningBriefingPage() {
         <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
           {priorities.length > 0 && (
             <div className="card" style={{ borderRadius: 'var(--r-lg)', padding: 24 }}>
-              <p style={{ ...S, fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--muted)', marginBottom: 14 }}>Top Priorities for Tomorrow</p>
+              <p style={{ ...S, fontSize: 11, fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--muted)', marginBottom: 14 }}>Tomorrow's Execution Plan — Do In This Order</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                {priorities.map((p, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 14px', borderRadius: 'var(--r)', background: 'var(--st1-bg)' }}>
-                    <span style={{ width: 26, height: 26, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 900, flexShrink: 0, background: 'var(--brand2)', color: '#fff', ...S }}>{i + 1}</span>
-                    <p style={{ fontSize: 13, lineHeight: 1.5, margin: 0, paddingTop: 3, color: 'var(--text)', fontFamily: 'Lato, sans-serif' }}>{p}</p>
-                  </div>
-                ))}
+                {priorities.map((p, i) => {
+                  const [task, why] = p.includes(' — ') ? p.split(' — ') : [p, null]
+                  return (
+                    <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 14px', borderRadius: 'var(--r)', background: 'var(--st1-bg)' }}>
+                      <span style={{ width: 26, height: 26, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 900, flexShrink: 0, background: 'var(--brand2)', color: '#fff', ...S }}>{i + 1}</span>
+                      <div>
+                        <p style={{ fontSize: 13, lineHeight: 1.5, margin: 0, color: 'var(--text)', fontFamily: 'Lato, sans-serif', fontWeight: 600 }}>{task}</p>
+                        {why && <p style={{ fontSize: 11, margin: '3px 0 0', color: 'var(--muted)', fontFamily: 'Lato, sans-serif' }}>↳ {why}</p>}
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -90,7 +96,7 @@ export default function EveningBriefingPage() {
           <div className="card" style={{ borderRadius: 'var(--r-lg)', padding: 24 }}>
             {streaming && <p style={{ ...S, fontSize: 11, fontWeight: 700, color: 'var(--brand2)', marginBottom: 12, marginTop: 0 }}>Generating…</p>}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-              {content.split('\n\n').filter(p => p.trim() && !p.startsWith('PRIORITIES_JSON')).map((para, i) => (
+              {content.split('\n\n').filter(p => p.trim() && !p.startsWith('PRIORITIES_JSON') && !p.startsWith('PLAN_JSON')).map((para, i) => (
                 <p key={i} style={{ fontSize: 13, lineHeight: 1.75, margin: 0, color: 'var(--text)', fontFamily: 'Lato, sans-serif' }}
                   dangerouslySetInnerHTML={{ __html: para
                     .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
