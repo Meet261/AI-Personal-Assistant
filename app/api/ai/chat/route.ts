@@ -27,12 +27,16 @@ export async function POST(req: NextRequest) {
       const decoder = new TextDecoder()
       let buffer = ''
       let inThinkBlock = false
+      let jsonBuf = ''   // buffer partial JSONL lines across TCP chunks
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) { controller.close(); break }
 
-        const lines = decoder.decode(value).split('\n').filter(Boolean)
+        jsonBuf += decoder.decode(value, { stream: true })
+        const rawLines = jsonBuf.split('\n')
+        jsonBuf = rawLines.pop() ?? ''
+        const lines = rawLines.filter(Boolean)
         for (const line of lines) {
           try {
             const json = JSON.parse(line)

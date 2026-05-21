@@ -44,12 +44,16 @@ export async function ollamaStream(
   const reader = res.body!.getReader()
   const decoder = new TextDecoder()
   let full = ''
+  let buf = ''   // buffer for partial lines split across TCP chunks
 
   while (true) {
     const { done, value } = await reader.read()
     if (done) break
-    const lines = decoder.decode(value).split('\n').filter(Boolean)
+    buf += decoder.decode(value, { stream: true })
+    const lines = buf.split('\n')
+    buf = lines.pop() ?? ''   // last element may be incomplete — keep buffered
     for (const line of lines) {
+      if (!line.trim()) continue
       try {
         const json = JSON.parse(line)
         if (json.message?.content) {
@@ -58,6 +62,13 @@ export async function ollamaStream(
         }
       } catch {}
     }
+  }
+  // flush any remaining buffered content
+  if (buf.trim()) {
+    try {
+      const json = JSON.parse(buf)
+      if (json.message?.content) full += json.message.content
+    } catch {}
   }
 
   return full.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
