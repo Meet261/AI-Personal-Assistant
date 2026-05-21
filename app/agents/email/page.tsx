@@ -1,12 +1,17 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
-import { Mail, RefreshCw, Send, AlertTriangle, Check, X } from 'lucide-react'
+import { Mail, RefreshCw, Send, AlertTriangle, Check, X, Plus, CheckCircle2 } from 'lucide-react'
 import AgentPageLayout from '@/components/agents/AgentPageLayout'
 
 const COLOR = '#DC2626'
 
 interface EmailItem { uid: number; from: string; subject: string; date: string; snippet: string; unread: boolean; priority?: string; category?: string; summary?: string }
 interface Draft { uid: number; subject: string; to: string; draft: string }
+interface TaskForm { uid: number; title: string; priority: string }
+
+const EMAIL_TO_PRIORITY: Record<string, string> = {
+  urgent: 'urgent', important: 'high', low: 'medium', 'can-ignore': 'low',
+}
 
 export default function EmailAgentPage() {
   const [inbox, setInbox] = useState<EmailItem[]>([])
@@ -20,6 +25,10 @@ export default function EmailAgentPage() {
   const [sending, setSending] = useState(false)
   const [sendConfirm, setSendConfirm] = useState(false)
   const [result, setResult] = useState<string | null>(null)
+  // Email → Task state
+  const [taskForm, setTaskForm] = useState<TaskForm | null>(null)
+  const [creatingTask, setCreatingTask] = useState(false)
+  const [taskCreated, setTaskCreated] = useState<number | null>(null) // uid of created task
 
   const loadCount = useCallback(async () => {
     const res = await fetch('/api/agents/email?action=get_unread_count').catch(() => null)
@@ -66,6 +75,25 @@ export default function EmailAgentPage() {
     setSendConfirm(false)
     setDraft(null)
     setSelectedEmail(null)
+  }
+
+  async function createTask() {
+    if (!taskForm) return
+    setCreatingTask(true)
+    const email = inbox.find(e => e.uid === taskForm.uid)
+    await fetch('/api/tasks', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        title: taskForm.title,
+        description: email?.summary || email?.snippet || '',
+        priority: taskForm.priority,
+        status: 'todo',
+      }),
+    }).catch(() => {})
+    setCreatingTask(false)
+    setTaskCreated(taskForm.uid)
+    setTaskForm(null)
+    setTimeout(() => setTaskCreated(null), 3000)
   }
 
   const PRIORITY_COLOR: Record<string, string> = { urgent: '#ef4444', important: '#f97316', low: '#94a3b8', 'can-ignore': '#94a3b8' }
@@ -121,7 +149,50 @@ export default function EmailAgentPage() {
                   <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'Lato', marginBottom: 4 }}>{email.from?.slice(0, 50)}</div>
                   {email.summary ? <div style={{ fontSize: 12, color: 'var(--text)', fontFamily: 'Lato', lineHeight: 1.4 }}>{email.summary}</div> : <div style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'Lato' }}>{email.snippet?.slice(0, 100)}</div>}
                 </div>
+                {/* → Task button */}
+                <div onClick={e => e.stopPropagation()} style={{ flexShrink: 0, display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-end' }}>
+                  {taskCreated === email.uid ? (
+                    <span style={{ fontSize: 11, color: '#22c55e', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 4 }}><CheckCircle2 size={12} /> Task created</span>
+                  ) : (
+                    <button
+                      onClick={() => setTaskForm({ uid: email.uid, title: email.subject || '(no subject)', priority: EMAIL_TO_PRIORITY[email.priority ?? ''] ?? 'medium' })}
+                      style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 7, border: '1px solid var(--border)', background: 'var(--faint)', color: 'var(--muted)', fontFamily: 'Raleway', fontWeight: 700, fontSize: 11, cursor: 'pointer', whiteSpace: 'nowrap' }}
+                    >
+                      <Plus size={10} /> Task
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {/* Inline task creation form */}
+              {taskForm?.uid === email.uid && (
+                <div onClick={e => e.stopPropagation()} style={{ marginTop: 10, padding: '12px 14px', borderRadius: 10, background: 'var(--faint)', border: '1px solid var(--border)', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--muted)', fontFamily: 'Raleway', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Create Task from Email</div>
+                  <input
+                    value={taskForm.title}
+                    onChange={e => setTaskForm(f => f ? { ...f, title: e.target.value } : null)}
+                    style={{ padding: '7px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--panel)', color: 'var(--text)', fontFamily: 'Lato', fontSize: 13, outline: 'none' }}
+                    onKeyDown={e => { if (e.key === 'Enter') createTask(); if (e.key === 'Escape') setTaskForm(null) }}
+                    autoFocus
+                  />
+                  <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                    {(['urgent', 'high', 'medium', 'low'] as const).map(p => {
+                      const pc = { urgent: '#ff5c7a', high: '#ffcc66', medium: '#3dd6d0', low: '#27d98a' }[p]
+                      return (
+                        <button key={p} type="button" onClick={() => setTaskForm(f => f ? { ...f, priority: p } : null)} style={{ padding: '3px 10px', borderRadius: 99, fontSize: 11, fontWeight: 700, fontFamily: 'Raleway', cursor: 'pointer', border: `1.5px solid ${taskForm.priority === p ? pc : 'var(--border)'}`, background: taskForm.priority === p ? `${pc}18` : 'transparent', color: taskForm.priority === p ? pc : 'var(--muted)', transition: 'all .1s' }}>
+                          {p.charAt(0).toUpperCase() + p.slice(1)}
+                        </button>
+                      )
+                    })}
+                    <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+                      <button type="button" onClick={() => setTaskForm(null)} style={{ padding: '5px 12px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--faint)', color: 'var(--muted)', fontFamily: 'Raleway', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>Cancel</button>
+                      <button type="button" onClick={createTask} disabled={!taskForm.title.trim() || creatingTask} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '5px 14px', borderRadius: 8, border: 'none', background: '#22c55e', color: '#fff', fontFamily: 'Raleway', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
+                        <Plus size={11} /> {creatingTask ? 'Creating…' : 'Create Task'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
         </div>
