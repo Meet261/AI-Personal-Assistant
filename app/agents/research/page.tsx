@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
-import { BookOpen, Play, Square, ExternalLink, RefreshCw, FileText, Tag, Cpu, Star, CheckCircle2, BookMarked, Clock } from 'lucide-react'
+import { BookOpen, Play, Square, ExternalLink, RefreshCw, FileText, Tag, Cpu, Star, CheckCircle2, BookMarked, Clock, X, Plus } from 'lucide-react'
 import AgentPageLayout from '@/components/agents/AgentPageLayout'
 import { startSession, dispatchTimerUpdate } from '@/lib/timer'
 
@@ -44,6 +44,11 @@ export default function ResearchAgentPage() {
   const [actioningId, setActioningId] = useState<string | null>(null)
   const [toast, setToast]           = useState<string | null>(null)
   const [queueFilter, setQueueFilter] = useState<'all' | 'reading' | 'unread'>('all')
+  // Paper → Task pipeline
+  const [taskModal, setTaskModal]   = useState<{ paper: Paper; suggestions: string[] } | null>(null)
+  const [taskTitles, setTaskTitles] = useState<string[]>([])
+  const [creatingTasks, setCreatingTasks] = useState(false)
+  const [tasksCreated, setTasksCreated] = useState(false)
 
   function showToast(msg: string) { setToast(msg); setTimeout(() => setToast(null), 3000) }
 
@@ -122,9 +127,54 @@ export default function ResearchAgentPage() {
       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id: paper.id, reading_status: 'read' }),
     }).catch(() => {})
-    showToast(`"${paper.title.slice(0, 40)}…" marked as read`)
     setActioningId(null)
     loadQueue()
+
+    // Generate task suggestions from key findings
+    const suggestions = generateTaskSuggestions(paper)
+    setTaskTitles(suggestions)
+    setTasksCreated(false)
+    setTaskModal({ paper, suggestions })
+  }
+
+  function generateTaskSuggestions(paper: Paper): string[] {
+    const suggestions: string[] = []
+    const title = paper.title.slice(0, 50)
+
+    // Always suggest: annotate + integrate into dissertation
+    suggestions.push(`Annotate key equations and methods in "${title}"`)
+    suggestions.push(`Write dissertation notes on findings from "${title}"`)
+
+    // If key findings exist, extract action items
+    if (paper.key_findings) {
+      const findings = paper.key_findings.slice(0, 400)
+      // Look for method names (capitalised words)
+      const methods = findings.match(/\b[A-Z][A-Za-z]{3,}\b/g)?.slice(0, 2) ?? []
+      for (const m of methods) {
+        if (!suggestions.some(s => s.includes(m))) {
+          suggestions.push(`Compare ${m} approach with existing methodology in dissertation`)
+        }
+      }
+    }
+
+    if (paper.summary) {
+      suggestions.push(`Add "${title}" to citation graph and check for related papers`)
+    }
+
+    return suggestions.slice(0, 5)
+  }
+
+  async function createSelectedTasks(selectedTitles: string[], paper: Paper) {
+    setCreatingTasks(true)
+    await Promise.all(selectedTitles.map(title =>
+      fetch('/api/tasks', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ title, description: `Follow-up from reading: ${paper.title}`, priority: 'medium', status: 'todo' }),
+      }).catch(() => {})
+    ))
+    setCreatingTasks(false)
+    setTasksCreated(true)
+    setTimeout(() => { setTaskModal(null); setTasksCreated(false) }, 1200)
   }
 
   const filteredQueue = queuePapers.filter(p => {
@@ -350,6 +400,43 @@ export default function ResearchAgentPage() {
   )
 
   return (
+    <>
+    {/* Paper → Task suggestion modal */}
+    {taskModal && (
+      <div onClick={() => setTaskModal(null)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(10,20,30,0.6)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <div onClick={e => e.stopPropagation()} style={{ width: 'min(520px,94vw)', background: 'var(--panel)', borderRadius: 20, border: `1px solid ${COLOR}40`, boxShadow: '0 28px 72px rgba(0,0,0,0.4)', overflow: 'hidden' }}>
+          <div style={{ padding: '18px 22px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <CheckCircle2 size={16} color="#22c55e" />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontFamily: 'Raleway', fontWeight: 800, fontSize: 14, color: 'var(--text)' }}>Paper read — create follow-up tasks?</div>
+              <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'Lato', marginTop: 2 }}>{taskModal.paper.title.slice(0, 60)}</div>
+            </div>
+            <button type="button" onClick={() => setTaskModal(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', lineHeight: 0 }}><X size={15} /></button>
+          </div>
+          <div style={{ padding: '16px 22px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <p style={{ margin: '0 0 8px', fontSize: 12, color: 'var(--muted)', fontFamily: 'Lato' }}>Select tasks to create (editable):</p>
+            {taskTitles.map((title, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input type="checkbox" defaultChecked style={{ width: 15, height: 15, cursor: 'pointer', flexShrink: 0 }}
+                  onChange={e => {
+                    if (!e.target.checked) setTaskTitles(ts => ts.filter((_, j) => j !== i))
+                    else setTaskTitles(ts => { const n = [...ts]; n[i] = title; return n })
+                  }} />
+                <input value={taskTitles[i] ?? title} onChange={e => setTaskTitles(ts => { const n = [...ts]; n[i] = e.target.value; return n })}
+                  style={{ flex: 1, padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--faint)', color: 'var(--text)', fontFamily: 'Lato', fontSize: 12, outline: 'none' }} />
+              </div>
+            ))}
+          </div>
+          <div style={{ padding: '12px 22px 18px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+            <button type="button" onClick={() => setTaskModal(null)} style={{ padding: '8px 16px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--faint)', color: 'var(--muted)', fontFamily: 'Raleway', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}>Skip</button>
+            <button type="button" disabled={creatingTasks || taskTitles.length === 0} onClick={() => createSelectedTasks(taskTitles.filter(Boolean), taskModal.paper)}
+              style={{ display: 'flex', alignItems: 'center', gap: 7, padding: '8px 18px', borderRadius: 10, border: 'none', background: tasksCreated ? '#22c55e' : COLOR, color: '#fff', fontFamily: 'Raleway', fontWeight: 800, fontSize: 12, cursor: 'pointer', transition: 'all .15s' }}>
+              {tasksCreated ? <><CheckCircle2 size={13} /> Created!</> : creatingTasks ? 'Creating…' : <><Plus size={13} /> Create {taskTitles.filter(Boolean).length} Tasks</>}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
     <AgentPageLayout
       agentId="research"
       agentName="Research Assistant"
@@ -383,5 +470,6 @@ export default function ResearchAgentPage() {
         </div>
       }
     />
+    </>
   )
 }
