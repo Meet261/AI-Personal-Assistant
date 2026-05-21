@@ -28,6 +28,13 @@ const KANBAN_COLS = [
   { key: 'done',        label: 'Done'    },
 ]
 
+// Returns true if a todo/deferred task has been idle for more than 7 days
+function isAged(task: Task): boolean {
+  if (task.status === 'done' || task.status === 'in_progress') return false
+  const created = new Date(task.created_at).getTime()
+  return Date.now() - created > 7 * 24 * 60 * 60 * 1000
+}
+
 const inp: React.CSSProperties = {
   background: 'var(--faint)', border: '1px solid var(--border)', color: 'var(--text)',
   borderRadius: 10, padding: '9px 13px', fontSize: 13, fontFamily: 'Lato, sans-serif', outline: 'none', width: '100%',
@@ -461,9 +468,12 @@ export default function TasksPage() {
                   <p style={{
                     fontSize: 13, fontWeight: 700, fontFamily: 'Raleway, sans-serif', color: 'var(--text)', margin: 0,
                     textDecoration: task.status === 'done' ? 'line-through' : 'none',
-                    opacity: task.status === 'done' ? 0.45 : 1,
+                    opacity: task.status === 'done' ? 0.45 : isAged(task) ? 0.6 : 1,
                     overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>{task.title}</p>
+                  }}>
+                    {isAged(task) && <span title="Idle for 7+ days" style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: '#f97316', marginRight: 7, verticalAlign: 'middle', flexShrink: 0 }} />}
+                    {task.title}
+                  </p>
                   <div style={{ display: 'flex', gap: 8, marginTop: 4, flexWrap: 'wrap', alignItems: 'center' }}>
                     {task.project && (
                       <span className="badge" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -535,7 +545,10 @@ export default function TasksPage() {
                   return (
                     <div key={task.id} className="kcard" onClick={() => setDrawerTask(task)}>
                       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
-                        <p style={{ fontWeight: 800, fontSize: 13, fontFamily: 'Raleway, sans-serif', color: 'var(--text)', margin: 0, flex: 1 }}>{task.title}</p>
+                        <p style={{ fontWeight: 800, fontSize: 13, fontFamily: 'Raleway, sans-serif', color: 'var(--text)', margin: 0, flex: 1, opacity: isAged(task) ? 0.65 : 1 }}>
+                          {isAged(task) && <span title="Idle for 7+ days" style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#f97316', marginRight: 6, verticalAlign: 'middle' }} />}
+                          {task.title}
+                        </p>
                         <KanbanCardMenu
                           task={task}
                           onEdit={() => setDrawerTask(task)}
@@ -614,7 +627,8 @@ export default function TasksPage() {
                     onMouseEnter={e => (e.currentTarget.style.background = 'var(--hover)')}
                     onMouseLeave={e => (e.currentTarget.style.background = '')}>
                     <td>
-                      <div style={{ fontWeight: 800, fontSize: 13, fontFamily: 'Raleway, sans-serif', color: task.status === 'done' ? 'var(--muted)' : 'var(--text)', textDecoration: task.status === 'done' ? 'line-through' : 'none' }}>
+                      <div style={{ fontWeight: 800, fontSize: 13, fontFamily: 'Raleway, sans-serif', color: task.status === 'done' ? 'var(--muted)' : 'var(--text)', textDecoration: task.status === 'done' ? 'line-through' : 'none', opacity: isAged(task) ? 0.65 : 1 }}>
+                        {isAged(task) && <span title="Idle for 7+ days" style={{ display: 'inline-block', width: 6, height: 6, borderRadius: '50%', background: '#f97316', marginRight: 6, verticalAlign: 'middle' }} />}
                         {task.title}
                       </div>
                       {task.description && (
