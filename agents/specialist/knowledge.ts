@@ -1,31 +1,22 @@
 // ─── Knowledge Agent — RAG over papers + notes via ChromaDB ──────────────
 // ChromaDB: http://localhost:8001 (chroma run --port 8001 --path .chroma-data)
-// Embeddings: nomic-embed-text via Ollama (free, local)
+// Embeddings: Jina AI jina-embeddings-v2-base-en (768-dim, free tier 1M tokens/month)
 
 import { createClient } from '@supabase/supabase-js'
+import { callJinaEmbed } from '../shared/models'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_KEY!
 )
 
-const CHROMA_URL  = process.env.CHROMA_URL ?? 'http://localhost:8001'
-const OLLAMA_URL  = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434'
-const EMBED_MODEL = 'nomic-embed-text'
-const COLLECTION  = 'papers'
+const CHROMA_URL = process.env.CHROMA_URL ?? 'http://localhost:8001'
+const COLLECTION = 'papers'
 
-// ── Embedding via Ollama nomic-embed-text (B2: try/catch) ────────────────
+// ── Embedding via Jina AI ─────────────────────────────────────────────────
 async function embed(text: string): Promise<number[]> {
-  try {
-    const res = await fetch(`${OLLAMA_URL}/api/embeddings`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: EMBED_MODEL, prompt: text }),
-    })
-    if (!res.ok) throw new Error(`Ollama embed error: ${res.statusText}`)
-    const data = await res.json()
-    return data.embedding as number[]
-  } catch (e) { throw new Error(`embed failed: ${e instanceof Error ? e.message : e}`) }
+  const embeddings = await callJinaEmbed([text])
+  return embeddings[0]
 }
 
 // ── ChromaDB helpers (B2: all wrapped in try/catch) ───────────────────────

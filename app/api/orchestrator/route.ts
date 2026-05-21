@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { classifyIntent, buildAgentSystemPrompt, synthesize } from '@/agents/orchestrator'
 import { buildAgentContext } from '@/agents/shared/context'
-import { callDeepSeekChat, callDeepSeekV3, modelForAgent } from '@/agents/shared/models'
+import { callDeepSeekChat, callDeepSeekV3 } from '@/agents/shared/models'
 import type { AgentId } from '@/agents/shared/types'
 
 // Specialist agent executors — imported inline to keep one API route
@@ -291,7 +291,7 @@ async function runAgent(
   //    - Pre-flight path (data already injected): R1 for reasoning — no tool calls needed
   //    - No pre-flight (write ops, open-ended): V3 for reliable tool-call JSON, then R1 for final reply
   const hasDeepSeekKey = !!process.env.DEEPSEEK_API_KEY
-  const agentModel = modelForAgent(agentId)
+  const agentModel = "deepseek-chat"
 
   let raw: string
   if (pre) {
@@ -425,7 +425,7 @@ export async function POST(req: NextRequest) {
       tool_results_ok: allToolResults.map(r => (r as { ok?: boolean }).ok ?? true),
       reply_length: finalReply.length,
       duration_ms: durationMs,
-      model_used: modelForAgent(intent.primaryAgent),
+      model_used: "deepseek-chat",
       v3_used: v3Used,
       estimated_cost_usd: estimatedCostUsd,
     }).then(() => {}),

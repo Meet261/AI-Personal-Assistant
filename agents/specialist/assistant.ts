@@ -1,6 +1,6 @@
 // ─── Personal Assistant specialist — tasks, projects & meetings ───────────
 import { createClient } from '@supabase/supabase-js'
-import { callDeepSeekChat as callOllama } from '../shared/models'
+import { callDeepSeekChat } from '../shared/models'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -194,7 +194,7 @@ For each action item, identify:
 Respond as JSON array: [{"task":"<what>","owner":"<who or 'me'>","due":"<date or null>"}]
 If no action items, respond: []`
 
-      const raw = await callOllama(
+      const raw = await callDeepSeekChat(
         [{ role: 'user', content: extractPrompt }],
         'You extract action items from meeting notes. Respond only with valid JSON.'
       )
@@ -263,7 +263,7 @@ Create a concise prep brief including:
 3. Questions to ask
 4. Relevant context from open tasks`
 
-      const brief = await callOllama(
+      const brief = await callDeepSeekChat(
         [{ role: 'user', content: briefPrompt }],
         'You prepare concise, actionable meeting briefs.'
       )

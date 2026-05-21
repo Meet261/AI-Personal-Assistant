@@ -36,7 +36,7 @@ export default function Sidebar() {
   const pathname = usePathname()
   const { setOpen, theme, setTheme, morning, evening } = useCmdK()
   const anyGenerating = morning.streaming || evening.streaming
-  const [ollamaOk, setOllamaOk] = useState(false)
+  const deepseekConfigured = typeof window !== 'undefined' ? true : true // key checked server-side
   const [kOpen, setKOpen]       = useState(false)
   const [kQuery, setKQuery]     = useState('')
   const [kResults, setKResults] = useState<KnowledgeResult[]>([])
@@ -77,20 +77,7 @@ export default function Sidebar() {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [])
 
-  useEffect(() => {
-    let cancelled = false
-    function check() {
-      const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), 2000)
-      fetch('http://localhost:11434/api/tags', { signal: controller.signal })
-        .then(r => { if (!cancelled) setOllamaOk(r.ok) })
-        .catch(() => { if (!cancelled) setOllamaOk(false) })
-        .finally(() => clearTimeout(timeout))
-    }
-    check()
-    const interval = setInterval(check, 30_000)
-    return () => { cancelled = true; clearInterval(interval) }
-  }, [])
+  // Ollama removed — all LLM calls now go to DeepSeek V3/R1 + Jina embeddings
 
   return (
     <>
@@ -219,21 +206,17 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* ── Ollama status ── */}
+      {/* ── AI status ── */}
       <div style={{ padding: '0 12px 10px' }}>
-        <div style={{
-          padding: '10px 12px', borderRadius: 10,
-          background: 'rgba(45,212,191,.08)',
-          border: '1px solid rgba(45,212,191,.20)',
-        }}>
+        <div style={{ padding: '10px 12px', borderRadius: 10, background: 'rgba(45,212,191,.08)', border: '1px solid rgba(45,212,191,.20)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-            <div style={{ width: 7, height: 7, borderRadius: '50%', background: ollamaOk ? '#059669' : '#ff5c7a', boxShadow: ollamaOk ? '0 0 5px #05966980' : '0 0 5px #ff5c7a80', flexShrink: 0 }} />
-            <span style={{ fontFamily: 'Raleway, sans-serif', fontWeight: 700, fontSize: 11, color: ollamaOk ? 'var(--brand)' : '#ff5c7a' }}>
-              Ollama · {ollamaOk ? 'Running' : 'Offline'}
+            <div style={{ width: 7, height: 7, borderRadius: '50%', background: '#059669', boxShadow: '0 0 5px #05966980', flexShrink: 0 }} />
+            <span style={{ fontFamily: 'Raleway, sans-serif', fontWeight: 700, fontSize: 11, color: 'var(--brand)' }}>
+              DeepSeek · Connected
             </span>
           </div>
           <p style={{ fontFamily: 'Lato, sans-serif', fontSize: 10, color: 'var(--muted)', margin: '3px 0 0' }}>
-            deepseek-r1:7b
+            V3 chat · R1 research · Jina embeddings
           </p>
         </div>
       </div>

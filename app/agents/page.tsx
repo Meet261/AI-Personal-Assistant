@@ -34,7 +34,7 @@ const AGENTS: AgentDef[] = [
 ]
 
 interface SysStatus {
-  ollama: boolean | null
+  deepseek: boolean | null
   chroma: boolean | null
   papers: number
   tasks: number
@@ -47,7 +47,7 @@ const CONTROLLABLE = ['trading', 'research']
 
 export default function AgentsHubPage() {
   const router = useRouter()
-  const [sys, setSys] = useState<SysStatus>({ ollama: null, chroma: null, papers: 0, tasks: 0, habits: 0, alerts: 0 })
+  const [sys, setSys] = useState<SysStatus>({ deepseek: null, chroma: null, papers: 0, tasks: 0, habits: 0, alerts: 0 })
   const [filter, setFilter] = useState('')
   const [agentStatus, setAgentStatus] = useState<Record<string, boolean>>({})
   const [controlling, setControlling] = useState<string | null>(null)
@@ -63,14 +63,14 @@ export default function AgentsHubPage() {
 
   useEffect(() => {
     Promise.allSettled([
-      fetch('/api/system/health', { signal: AbortSignal.timeout(3000) }).then(r => r.json()).then(d => d.services?.ollama ?? false),
+      fetch('/api/system/health', { signal: AbortSignal.timeout(3000) }).then(r => r.json()).then(d => d.services?.deepseek ?? false),
       fetch('/api/knowledge?action=status').then(r => r.json()).then(d => d.ok),
       fetch('/api/research/papers').then(r => r.json()).then(d => d.length),
       fetch('/api/tasks').then(r => r.json()).then(d => d.length),
       fetch('/api/agents/habit?action=get_habits').then(r => r.json()).then(d => d.data?.length ?? 0),
       fetch('/api/agents/scheduler?action=get_alerts').then(r => r.json()).then(d => d.data?.length ?? 0),
-    ]).then(([ollama, chroma, papers, tasks, habits, alerts]) => setSys({
-      ollama:  ollama.status  === 'fulfilled' ? ollama.value  as boolean : false,
+    ]).then(([deepseek, chroma, papers, tasks, habits, alerts]) => setSys({
+      deepseek: deepseek.status  === 'fulfilled' ? deepseek.value as boolean : false,
       chroma:  chroma.status  === 'fulfilled' ? chroma.value  as boolean : false,
       papers:  papers.status  === 'fulfilled' ? papers.value  as number  : 0,
       tasks:   tasks.status   === 'fulfilled' ? tasks.value   as number  : 0,
@@ -119,12 +119,12 @@ export default function AgentsHubPage() {
             <div>
               <h1 style={{ margin: 0, fontSize: 24, fontWeight: 900, color: 'var(--text)', letterSpacing: '-0.03em' }}>Agent Hub</h1>
               <p style={{ margin: '5px 0 0', fontSize: 13, color: 'var(--muted)', fontFamily: 'Lato' }}>
-                10 specialist agents · all running locally on DeepSeek R1 7b
+                10 specialist agents · DeepSeek V3 + R1 + Jina embeddings
               </p>
             </div>
             {/* Status pills */}
             <div style={{ display: 'flex', gap: 8 }}>
-              {[{ label: 'Ollama', ok: sys.ollama }, { label: 'ChromaDB', ok: sys.chroma }, { label: 'Server', ok: true as boolean }].map(s => (
+              {[{ label: 'DeepSeek', ok: sys.deepseek }, { label: 'ChromaDB', ok: sys.chroma }, { label: 'Server', ok: true as boolean }].map(s => (
                 <div key={s.label} style={{
                   display: 'flex', alignItems: 'center', gap: 6, padding: '5px 11px',
                   borderRadius: 8, border: '1px solid var(--border)', background: 'var(--faint)',

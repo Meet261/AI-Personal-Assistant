@@ -7,7 +7,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { executeTradingAction } from '../specialist/trading'
 import { executeJournalAction } from '../specialist/journal'
-import { callDeepSeekChat as callOllama } from '../shared/models'
+import { callDeepSeekChat } from '../shared/models'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -74,12 +74,12 @@ Energy today: ${energyLevel ? `${energyLevel}/5` : 'not logged'}
     const systemPrompt = 'You write short, honest journal reflection prompts. 1-2 sentences max. Direct, no fluff.'
 
     if (tradingOutcome === 'bad') {
-      journalPrompt = await callOllama(
+      journalPrompt = await callDeepSeekChat(
         [{ role: 'user', content: `Write a calm, non-judgmental journal reflection prompt for a trader who had a losing day (P&L: $${todayPnl?.toFixed(2)}). Focus on learning and mental reset, not the money.${promptContext}` }],
         systemPrompt
       ).catch(() => `Today's trading resulted in a $${Math.abs(todayPnl ?? 0).toFixed(2)} loss. What did you learn, and how will you reset for tomorrow?`)
     } else if (tradingOutcome === 'good') {
-      journalPrompt = await callOllama(
+      journalPrompt = await callDeepSeekChat(
         [{ role: 'user', content: `Write a grounding journal reflection prompt for a trader who had a winning day (P&L: +$${todayPnl?.toFixed(2)}). Encourage staying disciplined, not overconfident.${promptContext}` }],
         systemPrompt
       ).catch(() => `Strong trading day (+$${todayPnl?.toFixed(2)}). What worked well, and how do you stay disciplined tomorrow?`)

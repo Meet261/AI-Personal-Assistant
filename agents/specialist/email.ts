@@ -81,14 +81,9 @@ function extractText(parsed: { text?: string | boolean | null; html?: string | b
   return ''
 }
 
-// ── AI call — DeepSeek V3 with Ollama fallback ────────────────────────────
+// ── AI call — DeepSeek V3 ─────────────────────────────────────────────────
 async function callAI(messages: { role: string; content: string }[], system: string): Promise<string> {
-  try {
-    return await callDeepSeekV3(messages, system)
-  } catch {
-    const { callOllama } = await import('../shared/models')
-    return callOllama(messages, system)
-  }
+  return callDeepSeekV3(messages, system)
 }
 
 // ── Main executor ─────────────────────────────────────────────────────────

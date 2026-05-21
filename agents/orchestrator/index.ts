@@ -3,7 +3,7 @@
 // Returns which agents to call + synthesized response
 
 import type { AgentId, Intent, AgentContext, AgentMessage } from '../shared/types'
-import { callDeepSeekChat as callOllama } from '../shared/models'
+import { callDeepSeekChat } from '../shared/models'
 import { contextToString } from '../shared/context'
 
 // ── Intent classification prompt ──────────────────────────────────────────
@@ -45,7 +45,7 @@ export async function classifyIntent(
   const prompt = `${contextHint ? `Context: ${contextHint}\n` : ''}Message: "${userMessage}"`
 
   try {
-    const raw = await callOllama(
+    const raw = await callDeepSeekChat(
       [{ role: 'user', content: prompt }],
       CLASSIFIER_SYSTEM
     )
@@ -215,5 +215,5 @@ ${combined}
 
 Synthesize these into ONE coherent, natural response. Don't mention agent names. 2-3 paragraphs max.`
 
-  return callOllama([{ role: 'user', content: prompt }], 'You synthesize multiple AI agent responses into one clear answer.')
+  return callDeepSeekChat([{ role: 'user', content: prompt }], 'You synthesize multiple AI agent responses into one clear answer.')
 }

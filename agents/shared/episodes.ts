@@ -1,28 +1,19 @@
 // Episodic memory: store + retrieve past agent sessions by semantic similarity
-// Episodes are embedded (nomic-embed-text) and stored in agent_episodes table.
+// Episodes are embedded (Jina AI, 768-dim) and stored in agent_episodes table.
 // Retrieval uses pgvector cosine similarity so the LLM can reference past conversations.
 
 import { createClient } from '@supabase/supabase-js'
+import { callJinaEmbed } from './models'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
   process.env.SUPABASE_SERVICE_KEY!
 )
 
-const OLLAMA_URL  = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434'
-const EMBED_MODEL = 'nomic-embed-text'
-
 async function embedText(text: string): Promise<number[] | null> {
   try {
-    const res = await fetch(`${OLLAMA_URL}/api/embeddings`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: EMBED_MODEL, prompt: text }),
-      signal: AbortSignal.timeout(8000),
-    })
-    if (!res.ok) return null
-    const data = await res.json()
-    return data.embedding as number[]
+    const embeddings = await callJinaEmbed([text])
+    return embeddings[0] ?? null
   } catch {
     return null
   }

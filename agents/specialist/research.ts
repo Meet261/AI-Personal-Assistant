@@ -1,6 +1,6 @@
 // ─── Research specialist — papers, highlights, projects + writing mode ────
 import { createClient } from '@supabase/supabase-js'
-import { callDeepSeekR1 as callOllama } from '../shared/models'
+import { callDeepSeekR1 } from '../shared/models'
 import { executeKnowledgeAction } from './knowledge'
 
 const supabase = createClient(
@@ -132,7 +132,7 @@ Write a coherent, academic ${sectionType} on this topic.
 
 Draft the section now:`
 
-      const draft = await callOllama(
+      const draft = await callDeepSeekR1(
         [{ role: 'user', content: draftPrompt }],
         'You are an expert academic writer helping with dissertation writing. Write clearly and academically.'
       )
@@ -180,7 +180,7 @@ Provide:
 
 Format as a structured outline.`
 
-      const outline = await callOllama(
+      const outline = await callDeepSeekR1(
         [{ role: 'user', content: outlinePrompt }],
         'You are an expert dissertation advisor creating chapter outlines. Be specific and actionable.'
       )
@@ -207,7 +207,7 @@ Provide:
 1. Improved version
 2. Key changes made (2-3 bullet points)`
 
-      const result = await callOllama(
+      const result = await callDeepSeekR1(
         [{ role: 'user', content: improvePrompt }],
         'You are an academic writing editor. Maintain the author\'s voice while improving quality.'
       )

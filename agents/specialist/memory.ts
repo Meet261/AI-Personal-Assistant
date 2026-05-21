@@ -5,7 +5,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { readFileSync, existsSync, readdirSync } from 'fs'
 import { join, extname } from 'path'
-import { callDeepSeekChat as callOllama } from '../shared/models'
+import { callDeepSeekChat } from '../shared/models'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -173,7 +173,7 @@ ${messages.slice(-8).map(m => `${m.role}: ${m.content.slice(0, 200)}`).join('\n'
 Respond ONLY with a JSON array: [{"key":"snake_case_key","value":"the fact"}]
 If nothing to remember, respond: []`
 
-      const raw = await callOllama([{ role: 'user', content: prompt }], 'Extract memory facts. Respond only with valid JSON.')
+      const raw = await callDeepSeekChat([{ role: 'user', content: prompt }], 'Extract memory facts. Respond only with valid JSON.')
       const jsonMatch = raw.match(/\[[\s\S]*\]/)
       if (!jsonMatch) return { ok: true, message: 'No facts to extract', data: [] }
 
@@ -234,7 +234,7 @@ Provide:
 2. Exact fix (code if needed)
 3. How to verify it's fixed`
 
-      const reply = await callOllama(
+      const reply = await callDeepSeekChat(
         [{ role: 'user', content: debugPrompt }],
         `You are an expert ${language} debugger. Be precise and concise. Read the actual error carefully before suggesting a fix.`
       )

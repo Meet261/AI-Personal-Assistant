@@ -198,7 +198,7 @@ export default function Dashboard() {
     win_rate: number; open_positions: number; symbols: string[]
   } | null>(null)
   const [health, setHealth] = useState<{
-    services: { ollama: boolean; chroma: boolean; supabase: boolean }
+    services: { deepseek: boolean; chroma: boolean; supabase: boolean }
     episodes: { count: number }
     energy: { avg14d: number | null; latest: number | null; entries: number; peakWindow: string | null }
     momentum: { stalled: { name: string; daysSince: number }[] }
@@ -309,7 +309,7 @@ export default function Dashboard() {
           </div>
           <span style={{ width: 1, height: 16, background: 'var(--border)' }} />
           {([
-            { label: 'Ollama',   ok: health.services.ollama   },
+            { label: 'DeepSeek', ok: health.services.deepseek },
             { label: 'ChromaDB', ok: health.services.chroma   },
             { label: 'Supabase', ok: health.services.supabase },
           ]).map(s => (

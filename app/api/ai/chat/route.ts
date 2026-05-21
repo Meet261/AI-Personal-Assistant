@@ -1,67 +1,62 @@
+// Streaming chat endpoint — DeepSeek V3 (replaces previous Ollama streaming)
+// Used by the agent chat sidebar for real-time token streaming.
 import { NextRequest } from 'next/server'
 
-const OLLAMA_BASE = 'http://localhost:11434'
+const DEEPSEEK_URL = 'https://api.deepseek.com/chat/completions'
 
 export async function POST(req: NextRequest) {
-  const { messages, model = 'deepseek-r1:7b', systemPrompt } = await req.json()
+  const { messages, systemPrompt } = await req.json()
 
-  const ollamaMessages = []
-  if (systemPrompt) ollamaMessages.push({ role: 'system', content: systemPrompt })
-  ollamaMessages.push(...messages)
-
-  const ollamaRes = await fetch(`${OLLAMA_BASE}/api/chat`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages: ollamaMessages, stream: true }),
-  })
-
-  if (!ollamaRes.ok) {
-    return new Response(JSON.stringify({ error: 'Ollama not reachable' }), { status: 502 })
+  const apiKey = process.env.DEEPSEEK_API_KEY
+  if (!apiKey) {
+    return new Response(JSON.stringify({ error: 'DEEPSEEK_API_KEY not set' }), { status: 400 })
   }
 
-  // Stream the response back to the client
+  const chatMessages = []
+  if (systemPrompt) chatMessages.push({ role: 'system', content: systemPrompt })
+  chatMessages.push(...messages)
+
+  const dsRes = await fetch(DEEPSEEK_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model: 'deepseek-chat',  // V3
+      messages: chatMessages,
+      stream: true,
+      temperature: 0.3,
+      max_tokens: 1500,
+    }),
+  })
+
+  if (!dsRes.ok) {
+    const err = await dsRes.text()
+    return new Response(JSON.stringify({ error: `DeepSeek error: ${dsRes.status} ${err}` }), { status: 502 })
+  }
+
+  // DeepSeek streams SSE: "data: {json}\n\n" — forward tokens to client
   const encoder = new TextEncoder()
   const stream = new ReadableStream({
     async start(controller) {
-      const reader = ollamaRes.body!.getReader()
+      const reader = dsRes.body!.getReader()
       const decoder = new TextDecoder()
-      let buffer = ''
-      let inThinkBlock = false
-      let jsonBuf = ''   // buffer partial JSONL lines across TCP chunks
+      let buf = ''
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) { controller.close(); break }
 
-        jsonBuf += decoder.decode(value, { stream: true })
-        const rawLines = jsonBuf.split('\n')
-        jsonBuf = rawLines.pop() ?? ''
-        const lines = rawLines.filter(Boolean)
-        for (const line of lines) {
-          try {
-            const json = JSON.parse(line)
-            let chunk: string = json.message?.content || ''
-            if (!chunk) continue
+        buf += decoder.decode(value, { stream: true })
+        const lines = buf.split('\n')
+        buf = lines.pop() ?? ''
 
-            // Strip <think>…</think> blocks (DeepSeek R1 reasoning)
-            buffer += chunk
-            let out = ''
-            let i = 0
-            while (i < buffer.length) {
-              if (!inThinkBlock) {
-                const start = buffer.indexOf('<think>', i)
-                if (start === -1) { out += buffer.slice(i); buffer = ''; break }
-                out += buffer.slice(i, start)
-                inThinkBlock = true
-                i = start + 7
-              } else {
-                const end = buffer.indexOf('</think>', i)
-                if (end === -1) { buffer = buffer.slice(i); i = buffer.length; break }
-                inThinkBlock = false
-                i = end + 8
-              }
-            }
-            if (out) controller.enqueue(encoder.encode(out))
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue
+          const payload = line.slice(6).trim()
+          if (payload === '[DONE]') { controller.close(); return }
+          try {
+            const json = JSON.parse(payload)
+            const chunk: string = json.choices?.[0]?.delta?.content ?? ''
+            if (chunk) controller.enqueue(encoder.encode(chunk))
           } catch {}
         }
       }

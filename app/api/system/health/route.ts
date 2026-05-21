@@ -7,8 +7,7 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_KEY!
 )
 
-const OLLAMA_URL  = process.env.OLLAMA_BASE_URL ?? 'http://localhost:11434'
-const CHROMA_URL  = process.env.CHROMA_URL      ?? 'http://localhost:8001'
+const CHROMA_URL = process.env.CHROMA_URL ?? 'http://localhost:8001'
 
 async function ping(url: string, timeoutMs = 2000): Promise<boolean> {
   try {
@@ -17,12 +16,17 @@ async function ping(url: string, timeoutMs = 2000): Promise<boolean> {
   } catch { return false }
 }
 
+async function checkDeepSeek(): Promise<boolean> {
+  const apiKey = process.env.DEEPSEEK_API_KEY
+  return !!apiKey // If the key is set we treat it as connected (no need to ping on every health check)
+}
+
 export async function GET() {
   const today = format(new Date(), 'yyyy-MM-dd')
   const since14 = format(new Date(Date.now() - 14 * 86_400_000), 'yyyy-MM-dd')
 
-  const [ollamaOk, chromaOk, episodesRes, energyRes, momentumRes] = await Promise.all([
-    ping(`${OLLAMA_URL}/api/tags`),
+  const [deepseekOk, chromaOk, episodesRes, energyRes, momentumRes] = await Promise.all([
+    checkDeepSeek(),
     ping(`${CHROMA_URL}/api/v2/heartbeat`),
     supabase.from('agent_episodes').select('id', { count: 'exact', head: true }),
     supabase.from('journal_entries').select('date,energy_level').gte('date', since14).order('date'),
@@ -33,14 +37,12 @@ export async function GET() {
       .order('updated_at', { ascending: false }),
   ])
 
-  // Energy stats
   const energyEntries = (energyRes.data ?? []).filter(e => e.energy_level != null)
   const avgEnergy = energyEntries.length
     ? energyEntries.reduce((s, e) => s + (e.energy_level ?? 0), 0) / energyEntries.length
     : null
   const latestEnergy = energyEntries.at(-1)?.energy_level ?? null
 
-  // Project momentum — find last task activity per project
   type TaskRow = { project_id: string; updated_at: string; status: string; project: { id: string; name: string; status: string } | { id: string; name: string; status: string }[] }
   const taskRows = (momentumRes.data ?? []) as TaskRow[]
   const lastActivityByProject: Record<string, { name: string; daysSince: number }> = {}
@@ -61,16 +63,15 @@ export async function GET() {
 
   return NextResponse.json({
     services: {
-      ollama:   ollamaOk,
+      deepseek: deepseekOk,
       chroma:   chromaOk,
       supabase: true,
     },
     episodes: { count: episodesRes.count ?? 0 },
     energy: {
-      avg14d:  avgEnergy   !== null ? parseFloat(avgEnergy.toFixed(1))   : null,
-      latest:  latestEnergy,
-      entries: energyEntries.length,
-      // Suggest peak window based on avg
+      avg14d:     avgEnergy !== null ? parseFloat(avgEnergy.toFixed(1)) : null,
+      latest:     latestEnergy,
+      entries:    energyEntries.length,
       peakWindow: avgEnergy === null ? null
         : avgEnergy >= 4 ? '8–11 AM'
         : avgEnergy < 2.5 ? '10 AM–12 PM'

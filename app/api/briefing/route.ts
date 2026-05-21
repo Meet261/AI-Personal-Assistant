@@ -40,27 +40,7 @@ async function generateBriefing(prompt: string): Promise<{ content: string; top_
     return { content, top_priorities }
   }
 
-  // Fallback: Ollama R1
-  const res = await fetch('http://localhost:11434/api/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'deepseek-r1:7b',
-      messages: [
-        { role: 'system', content: 'You are a concise, professional productivity assistant. Be direct and actionable.' },
-        { role: 'user', content: prompt },
-      ],
-      stream: false,
-    }),
-    signal: AbortSignal.timeout(120000),
-  })
-  if (!res.ok) throw new Error('Ollama error')
-  const data = await res.json()
-  const raw = (data.message?.content ?? '').replace(/<think>[\s\S]*?<\/think>/g, '').trim()
-  const jsonMatch = raw.match(/PLAN_JSON:\s*(\[[\s\S]*?\])/)
-  const top_priorities: string[] = jsonMatch ? JSON.parse(jsonMatch[1]) : []
-  const content = raw.replace(/PLAN_JSON:[\s\S]*$/, '').trim()
-  return { content, top_priorities }
+  throw new Error('DEEPSEEK_API_KEY not set — briefing requires DeepSeek API access')
 }
 
 // Wrap in SSE stream so existing client code works unchanged

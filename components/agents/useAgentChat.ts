@@ -144,7 +144,7 @@ export function useAgentChat(agentId: string) {
         const errMsg = (e as Error).message ?? ''
         const hint = errMsg.includes('timeout') || errMsg.includes('504') || errMsg.includes('AbortError')
           ? '⚠️ The model took too long to respond. Ollama is running but the request timed out — try again or ask something shorter.'
-          : '⚠️ Could not reach the agent. Make sure Ollama is running (`ollama serve`).'
+          : '⚠️ Could not reach the agent. Check your DeepSeek API key is set.'
         setMessages(prev => prev.map(m => m.id === loadingId ? { ...m, content: hint, isLoading: false } : m))
       }
     } finally {
