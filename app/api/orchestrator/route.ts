@@ -120,9 +120,30 @@ async function preflight(
     agentData = { data: result.data, summary: result.message }
   }
 
-  else if (agentId === 'email' && /unread|inbox|check|how many|triage/i.test(m)) {
-    const result = await executeEmailAction('get_unread_count', {})
-    agentData = { data: result.data, summary: result.message }
+  else if (agentId === 'email') {
+    if (/summar|latest|recent|last email|read.*email|what.*email|show.*email/i.test(m)) {
+      // Fetch latest email UID then summarize (summary is cached per UID)
+      const inboxResult = await executeEmailAction('fetch_inbox', { limit: 1, unread_only: false })
+      if (!inboxResult.ok) {
+        agentData = { data: null, summary: `Failed to fetch email: ${inboxResult.message}` }
+      } else if (Array.isArray(inboxResult.data) && inboxResult.data.length > 0) {
+        const latest = inboxResult.data[0] as { uid: number }
+        const summaryResult = await executeEmailAction('summarize_email', { uid: latest.uid })
+        agentData = { data: summaryResult.ok ? summaryResult.data : null, summary: summaryResult.ok ? summaryResult.message : `Failed: ${summaryResult.message}` }
+      } else {
+        agentData = { data: null, summary: 'No emails found in inbox' }
+      }
+    } else if (/triage|priorit/i.test(m)) {
+      const result = await executeEmailAction('triage_inbox', { limit: 15 })
+      agentData = { data: result.data, summary: result.message }
+    } else if (/unread|inbox|check|how many/i.test(m)) {
+      const result = await executeEmailAction('get_unread_count', {})
+      agentData = { data: result.data, summary: result.message }
+    } else {
+      // Default: fetch recent inbox
+      const result = await executeEmailAction('fetch_inbox', { limit: 10, unread_only: false })
+      agentData = { data: result.data, summary: result.message }
+    }
   }
 
   else if (agentId === 'research') {
@@ -289,8 +310,8 @@ If no tool is needed, answer directly in plain English.`
     const v3Raw = await callDeepSeekV3(augmentedMessages, toolSystemPrompt)
 
     // Check if V3 emitted a tool block
-    const toolMatch = TOOL_REGEX.exec(v3Raw)
     TOOL_REGEX.lastIndex = 0
+    const toolMatch = TOOL_REGEX.exec(v3Raw)
 
     if (toolMatch) {
       // Execute the tool call from V3
