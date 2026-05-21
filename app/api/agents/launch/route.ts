@@ -5,6 +5,9 @@ import { join } from 'path'
 import * as net from 'net'
 import { isResearchEnabled, setResearchEnabled } from '@/lib/research-state'
 
+// launchd runs with a minimal PATH — ensure system tools are found
+const EXEC_ENV = { ...process.env, PATH: '/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin' }
+
 // ---------------------------------------------------------------------------
 // Agent process registry (in-memory, lives as long as Next.js server runs)
 // ---------------------------------------------------------------------------
@@ -38,6 +41,7 @@ const AGENT_CONFIGS: Record<string, {
   cmd?: string
   args?: string[]
   env?: Record<string, string>
+  watchdog?: string     // optional watchdog shell script path
   paManaged?: boolean   // controlled by toggle, not a process
 }> = {
   research: {
@@ -51,11 +55,12 @@ const AGENT_CONFIGS: Record<string, {
     cmd: join(BASE, 'Trading Agent', 'trading_agent', '.venv', 'bin', 'uvicorn'),
     args: ['trading_agent.api.server:app', '--host', '0.0.0.0', '--port', '8000'],
     env: { PYTHONPATH: join(BASE, 'Trading Agent', 'trading_agent', 'src') },
+    watchdog: join(BASE, 'Trading Agent', 'trading_agent', 'scripts', 'watchdog.sh'),
   },
 }
 
 // ---------------------------------------------------------------------------
-// Port check — try socket first, fall back to lsof
+// Port check — try socket first, fall back to /usr/sbin/lsof
 // ---------------------------------------------------------------------------
 
 function isPortOpen(port: number): Promise<boolean> {
@@ -64,9 +69,9 @@ function isPortOpen(port: number): Promise<boolean> {
     sock.setTimeout(600)
     sock.on('connect', () => { sock.destroy(); resolve(true) })
     sock.on('error', () => {
-      // Fallback: lsof check (more reliable on macOS)
+      // Fallback: /usr/sbin/lsof check (more reliable on macOS)
       try {
-        const out = execSync(`lsof -ti :${port} 2>/dev/null || true`, { timeout: 1000 }).toString().trim()
+        const out = execSync(`/usr/sbin/lsof -ti :${port} 2>/dev/null || true`, { timeout: 1000, env: EXEC_ENV }).toString().trim()
         resolve(out.length > 0)
       } catch {
         resolve(false)
@@ -75,7 +80,7 @@ function isPortOpen(port: number): Promise<boolean> {
     sock.on('timeout', () => {
       sock.destroy()
       try {
-        const out = execSync(`lsof -ti :${port} 2>/dev/null || true`, { timeout: 1000 }).toString().trim()
+        const out = execSync(`/usr/sbin/lsof -ti :${port} 2>/dev/null || true`, { timeout: 1000, env: EXEC_ENV }).toString().trim()
         resolve(out.length > 0)
       } catch {
         resolve(false)
@@ -179,31 +184,43 @@ export async function POST(req: NextRequest) {
       processes.delete(agent)
     })
 
+    // Start watchdog if configured (detached so it survives independently)
+    if (cfg.watchdog && existsSync(cfg.watchdog)) {
+      const wd = spawn('bash', [cfg.watchdog], {
+        cwd: cfg.cwd!,
+        env: { ...process.env, ...cfg.env },
+        detached: true,
+        stdio: 'ignore',
+      })
+      wd.unref()
+      appendLog(agent, `[watchdog started pid ${wd.pid}]`)
+    }
+
     return NextResponse.json({ ok: true, message: `Started ${agent} (pid ${proc.pid})`, pid: proc.pid })
   }
 
   if (action === 'stop') {
     const managed = processes.get(agent)
     if (managed) {
-      managed.proc.kill('SIGTERM')
+      managed.proc.kill('SIGKILL')
       processes.delete(agent)
-      return NextResponse.json({ ok: true, message: `Stopped ${agent}` })
     }
-    // Not managed by PA — kill by port and verify
-    try {
-      execSync(`lsof -ti :${cfg.port} | xargs kill -9 2>/dev/null || true`)
-      // Wait up to 2s for port to clear
-      for (let i = 0; i < 4; i++) {
-        await new Promise(r => setTimeout(r, 500))
-        const pids = execSync(`lsof -ti :${cfg.port} 2>/dev/null || true`).toString().trim()
-        if (!pids) return NextResponse.json({ ok: true, message: `Stopped ${agent}` })
-        // Still running — kill again harder
-        if (pids) execSync(`kill -9 ${pids} 2>/dev/null || true`)
-      }
-      return NextResponse.json({ ok: true, message: `Stopped ${agent}` })
-    } catch {
-      return NextResponse.json({ ok: false, message: 'Could not stop process' })
+    // Kill watchdog + server via shell so pipes work correctly
+    const killScript = [
+      `/usr/bin/pkill -f "scripts/watchdog.sh" 2>/dev/null`,
+      `pids=$(/usr/sbin/lsof -ti :${cfg.port} 2>/dev/null)`,
+      `[ -n "$pids" ] && kill -9 $pids 2>/dev/null`,
+      `exit 0`,
+    ].join('\n')
+    execSync(`bash -c '${killScript.replace(/'/g, "'\\''")}'`, { env: EXEC_ENV })
+    // Wait up to 3s for port to clear
+    for (let i = 0; i < 6; i++) {
+      await new Promise(r => setTimeout(r, 500))
+      const pids = execSync(`/usr/sbin/lsof -ti :${cfg.port} 2>/dev/null || true`, { env: EXEC_ENV }).toString().trim()
+      if (!pids) return NextResponse.json({ ok: true, message: `Stopped ${agent}` })
+      execSync(`bash -c 'kill -9 ${pids.split('\n').join(' ')} 2>/dev/null || true'`, { env: EXEC_ENV })
     }
+    return NextResponse.json({ ok: true, message: `Stopped ${agent}` })
   }
 
   return NextResponse.json({ error: 'Unknown action' }, { status: 400 })

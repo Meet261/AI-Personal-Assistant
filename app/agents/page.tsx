@@ -63,7 +63,7 @@ export default function AgentsHubPage() {
 
   useEffect(() => {
     Promise.allSettled([
-      fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(2000) }).then(r => r.ok),
+      fetch('/api/system/health', { signal: AbortSignal.timeout(3000) }).then(r => r.json()).then(d => d.services?.ollama ?? false),
       fetch('/api/knowledge?action=status').then(r => r.json()).then(d => d.ok),
       fetch('/api/research/papers').then(r => r.json()).then(d => d.length),
       fetch('/api/tasks').then(r => r.json()).then(d => d.length),
@@ -83,11 +83,15 @@ export default function AgentsHubPage() {
   const controlAgent = useCallback(async (agentId: string, action: 'start' | 'stop', e: React.MouseEvent) => {
     e.stopPropagation()
     setControlling(agentId)
+    // Optimistically update UI immediately so stop doesn't flicker back to running
+    if (action === 'stop') setAgentStatus(prev => ({ ...prev, [agentId]: false }))
     await fetch('/api/agents/launch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ agent: agentId, action }),
     })
+    // Wait for port to fully release before re-polling
+    await new Promise(r => setTimeout(r, action === 'stop' ? 3000 : 800))
     await loadStatus()
     setControlling(null)
   }, [loadStatus])

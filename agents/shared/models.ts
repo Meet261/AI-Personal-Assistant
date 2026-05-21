@@ -11,7 +11,7 @@ export const DEFAULT_LOCAL_MODEL = 'deepseek-r1:7b'
 // Create with: ollama create <name> -f modelfiles/Modelfile.<name>
 export const AGENT_MODELS: Record<string, string> = {
   assistant:  'pa-assistant',   // deepseek-r1:7b + 16K ctx + productivity prompt
-  trading:    'pa-trading',     // plutus (finance fine-tune) + 8K ctx + discipline prompt
+  trading:    'pa-trading',     // deprecated — veto now uses Claude Haiku via API
   research:   'pa-research',    // deepseek-r1:7b + 32K ctx + critical analysis prompt
 }
 
