@@ -46,7 +46,7 @@ function MarkdownContent({ text, isUser }: { text: string; isUser: boolean }) {
   return <>{els}</>
 }
 
-export type AgentTab = 'dashboard' | 'today' | 'actions' | 'chat' | 'history' | 'settings' | 'queue'
+export type AgentTab = 'dashboard' | 'today' | 'actions' | 'chat' | 'history' | 'settings' | 'queue' | 'patterns'
 
 interface Props {
   agentId: string
@@ -62,6 +62,7 @@ interface Props {
   history?: React.ReactNode
   settings?: React.ReactNode
   queue?: React.ReactNode
+  patterns?: React.ReactNode
   commandCenter?: React.ReactNode
 }
 
@@ -73,13 +74,14 @@ const TAB_META: Record<AgentTab, { label: string; icon: React.ElementType }> = {
   history:   { label: 'History',   icon: History },
   settings:  { label: 'Settings',  icon: Settings },
   queue:     { label: 'Queue',     icon: BookMarked },
+  patterns:  { label: 'Patterns',  icon: Activity },
 }
 
 interface Session { id: string; title?: string; started_at: string; message_count?: number; agent_id: string }
 
 export default function AgentPageLayout({
   agentId, agentName, agentColor, agentIcon, description,
-  tabs, starters = [], dashboard, today, actions, history, settings, queue, commandCenter,
+  tabs, starters = [], dashboard, today, actions, history, settings, queue, patterns, commandCenter,
 }: Props) {
   const [activeTab, setActiveTab] = useState<AgentTab>(tabs[0] ?? 'dashboard')
   const [chatOpen, setChatOpen] = useState(false)
@@ -229,6 +231,7 @@ export default function AgentPageLayout({
           {activeTab === 'history' && history}
           {activeTab === 'settings' && settings}
           {activeTab === 'queue' && queue}
+          {activeTab === 'patterns' && patterns}
           {activeTab === 'chat' && (
             <div style={{ maxWidth: 720, margin: '0 auto' }}>
               <ChatView

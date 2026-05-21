@@ -79,6 +79,7 @@ export default function TradingAgentPage() {
   const [loading, setLoading] = useState(true)
   const [tradeFilter, setTradeFilter] = useState<'all' | 'today' | 'wins' | 'losses'>('all')
   const [refreshing, setRefreshing] = useState(false)
+  const [allTrades, setAllTrades] = useState<Trade[]>([])
   // null = unknown (loading), true/false = confirmed from API
   const [agentRunning, setAgentRunning] = useState<boolean | null>(null)
   const [controlling, setControlling] = useState(false)
@@ -123,8 +124,9 @@ export default function TradingAgentPage() {
         fetch('/api/agents/trading/trades').then(r => r.json()).catch(() => null),
         fetch('/api/agents/trading/today').then(r => r.json()).catch(() => null),
       ])
-      if (tradeRes?.data && Array.isArray(tradeRes.data)) setTrades(tradeRes.data)
-      else if (Array.isArray(tradeRes)) setTrades(tradeRes)
+      const tradeList: Trade[] = tradeRes?.data && Array.isArray(tradeRes.data) ? tradeRes.data : Array.isArray(tradeRes) ? tradeRes : []
+      setTrades(tradeList)
+      setAllTrades(tradeList)
       if (todayRes?.data?.trades) {
         setTodayTrades(todayRes.data.trades)
         setTodayPnlData(todayRes.data.summary)
@@ -180,6 +182,55 @@ export default function TradingAgentPage() {
   const winRate = summary?.win_rate ?? 0
   const totalPnl = summary?.total_pnl ?? 0
   const todayPnl = summary?.today_pnl ?? 0
+
+  // ── Pattern analysis (computed from allTrades) ────────────────────────────
+  const patterns = (() => {
+    if (!allTrades.length) return null
+    const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+    const dayMap: Record<string, { count: number; wins: number; pnl: number }> = {}
+    const hourMap: Record<number, { count: number; wins: number; pnl: number }> = {}
+    const symMap: Record<string, { count: number; wins: number; pnl: number }> = {}
+    const streakBuckets: Record<string, { count: number; wins: number }> = { '0': { count:0,wins:0 }, '1': { count:0,wins:0 }, '2': { count:0,wins:0 }, '3+': { count:0,wins:0 } }
+    let consecLosses = 0
+
+    const sorted = [...allTrades].sort((a, b) => a.close_time < b.close_time ? -1 : 1)
+    for (const t of sorted) {
+      const profit = parseFloat(t.profit)
+      const isWin = profit > 0
+      const parts = t.close_time?.split(' ')
+      if (!parts || parts.length < 2) continue
+      const [datePart, timePart] = parts
+      const [y, m, d] = datePart.split('.')
+      const dt = new Date(`${y}-${m}-${d}T${timePart}`)
+      const day = DAYS[dt.getDay()]
+      const hour = dt.getHours()
+      const sym = t.symbol
+
+      if (!dayMap[day]) dayMap[day] = { count: 0, wins: 0, pnl: 0 }
+      dayMap[day].count++; dayMap[day].wins += isWin ? 1 : 0; dayMap[day].pnl += profit
+
+      if (!hourMap[hour]) hourMap[hour] = { count: 0, wins: 0, pnl: 0 }
+      hourMap[hour].count++; hourMap[hour].wins += isWin ? 1 : 0; hourMap[hour].pnl += profit
+
+      if (!symMap[sym]) symMap[sym] = { count: 0, wins: 0, pnl: 0 }
+      symMap[sym].count++; symMap[sym].wins += isWin ? 1 : 0; symMap[sym].pnl += profit
+
+      const sk = consecLosses === 0 ? '0' : consecLosses === 1 ? '1' : consecLosses === 2 ? '2' : '3+'
+      streakBuckets[sk].count++; streakBuckets[sk].wins += isWin ? 1 : 0
+      consecLosses = isWin ? 0 : consecLosses + 1
+    }
+
+    const wr = (s: { count: number; wins: number }) => s.count ? Math.round((s.wins / s.count) * 100) : 0
+    const dayOrder = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+    const days = dayOrder.filter(d => dayMap[d]).map(d => ({ day: d, ...dayMap[d], wr: wr(dayMap[d]) }))
+    const hours = Object.entries(hourMap).sort((a, b) => +a[0] - +b[0]).map(([h, s]) => ({ hour: +h, ...s, wr: wr(s) }))
+    const symbols = Object.entries(symMap).sort((a, b) => b[1].count - a[1].count).map(([sym, s]) => ({ sym, ...s, wr: wr(s) }))
+    const streaks = ['0', '1', '2', '3+'].filter(k => streakBuckets[k].count > 0).map(k => ({ after: k, ...streakBuckets[k], wr: wr(streakBuckets[k]) }))
+    const bestHour = hours.reduce((a, b) => (b.count >= 3 && b.wr > a.wr ? b : a), hours[0])
+    const worstHour = hours.reduce((a, b) => (b.count >= 3 && b.wr < a.wr ? b : a), hours[0])
+
+    return { days, hours, symbols, streaks, bestHour, worstHour }
+  })()
 
   // Dashboard tab
   const dashboard = (
@@ -528,7 +579,7 @@ export default function TradingAgentPage() {
         agentColor={COLOR}
         agentIcon={<TrendingUp size={20} />}
         description="P&L analytics, risk monitoring & trade history"
-        tabs={['dashboard', 'today', 'actions', 'chat', 'settings']}
+        tabs={['dashboard', 'today', 'patterns', 'actions', 'chat', 'settings']}
       starters={[
         'How did trading go today?',
         'What is my current win rate?',
@@ -541,6 +592,103 @@ export default function TradingAgentPage() {
       actions={actions}
       settings={settings}
       commandCenter={commandCenter}
+      patterns={patterns ? (
+        <div style={{ maxWidth: 860 }}>
+          <h2 style={{ margin: '0 0 20px', fontSize: 18, fontWeight: 900, fontFamily: 'Raleway', color: 'var(--text)' }}>Pattern Analysis — {allTrades.length} trades</h2>
+
+          {/* Key insights banner */}
+          {patterns.bestHour && patterns.worstHour && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 24 }}>
+              <div style={{ padding: '14px 18px', borderRadius: 14, background: '#22c55e10', border: '1px solid #22c55e30' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#22c55e', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Best Hour</div>
+                <div style={{ fontSize: 22, fontWeight: 900, color: '#22c55e', fontFamily: 'Raleway' }}>{patterns.bestHour.hour}:00–{patterns.bestHour.hour+1}:00</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'Lato', marginTop: 4 }}>{patterns.bestHour.wr}% win rate · {patterns.bestHour.count} trades</div>
+              </div>
+              <div style={{ padding: '14px 18px', borderRadius: 14, background: '#ef444410', border: '1px solid #ef444430' }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#ef4444', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>Worst Hour</div>
+                <div style={{ fontSize: 22, fontWeight: 900, color: '#ef4444', fontFamily: 'Raleway' }}>{patterns.worstHour.hour}:00–{patterns.worstHour.hour+1}:00</div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'Lato', marginTop: 4 }}>{patterns.worstHour.wr}% win rate · {patterns.worstHour.count} trades</div>
+              </div>
+            </div>
+          )}
+
+          {/* Win rate by day */}
+          <div style={{ background: 'var(--panel)', borderRadius: 16, border: '1px solid var(--border)', padding: 20, marginBottom: 16 }}>
+            <h3 style={{ margin: '0 0 16px', fontSize: 13, fontWeight: 800, fontFamily: 'Raleway', color: 'var(--text)' }}>Win Rate by Day of Week</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {patterns.days.map(d => {
+                const barColor = d.wr >= 55 ? '#22c55e' : d.wr >= 45 ? COLOR : '#ef4444'
+                return (
+                  <div key={d.day} style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)', fontFamily: 'Raleway', width: 32 }}>{d.day}</span>
+                    <div style={{ flex: 1, height: 24, borderRadius: 6, background: 'var(--faint)', overflow: 'hidden', position: 'relative' }}>
+                      <div style={{ width: `${d.wr}%`, height: '100%', background: barColor, borderRadius: 6, transition: 'width .4s' }} />
+                      <span style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', fontSize: 11, fontWeight: 800, color: d.wr > 20 ? '#fff' : 'var(--text)', fontFamily: 'Raleway' }}>{d.wr}%</span>
+                    </div>
+                    <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'Lato', width: 80, textAlign: 'right' }}>{d.count} trades · ${d.pnl.toFixed(0)}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Win rate by hour */}
+          <div style={{ background: 'var(--panel)', borderRadius: 16, border: '1px solid var(--border)', padding: 20, marginBottom: 16 }}>
+            <h3 style={{ margin: '0 0 16px', fontSize: 13, fontWeight: 800, fontFamily: 'Raleway', color: 'var(--text)' }}>Win Rate by Hour (close time)</h3>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end', height: 80 }}>
+              {patterns.hours.map(h => {
+                const barColor = h.wr >= 55 ? '#22c55e' : h.wr >= 45 ? COLOR : '#ef4444'
+                const barH = Math.max(8, (h.wr / 100) * 70)
+                return (
+                  <div key={h.hour} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                    <span style={{ fontSize: 9, fontWeight: 800, color: h.wr >= 55 ? '#22c55e' : h.wr <= 35 ? '#ef4444' : 'var(--muted)', fontFamily: 'Raleway' }}>{h.wr}%</span>
+                    <div style={{ width: '100%', height: barH, borderRadius: '3px 3px 0 0', background: barColor, position: 'relative' }} title={`${h.hour}:00 — ${h.count} trades, ${h.wr}% WR, $${h.pnl.toFixed(0)}`} />
+                    <span style={{ fontSize: 9, color: 'var(--muted)', fontFamily: 'Lato' }}>{h.hour}</span>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Symbol + streak row */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+            {/* Symbol breakdown */}
+            <div style={{ background: 'var(--panel)', borderRadius: 16, border: '1px solid var(--border)', padding: 20 }}>
+              <h3 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 800, fontFamily: 'Raleway', color: 'var(--text)' }}>By Symbol</h3>
+              {patterns.symbols.map(s => (
+                <div key={s.sym} style={{ marginBottom: 12 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', fontFamily: 'Raleway' }}>{s.sym}</span>
+                    <span style={{ fontSize: 12, fontWeight: 800, color: s.wr >= 50 ? '#22c55e' : '#ef4444', fontFamily: 'Raleway' }}>{s.wr}%</span>
+                  </div>
+                  <div style={{ height: 6, borderRadius: 3, background: 'var(--faint)' }}>
+                    <div style={{ width: `${s.wr}%`, height: '100%', borderRadius: 3, background: s.wr >= 50 ? '#22c55e' : '#ef4444' }} />
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'Lato', marginTop: 3 }}>{s.count} trades · {s.wins}W/{s.count - s.wins}L · ${s.pnl.toFixed(0)}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* After-loss streaks */}
+            <div style={{ background: 'var(--panel)', borderRadius: 16, border: '1px solid var(--border)', padding: 20 }}>
+              <h3 style={{ margin: '0 0 14px', fontSize: 13, fontWeight: 800, fontFamily: 'Raleway', color: 'var(--text)' }}>Win Rate After Consecutive Losses</h3>
+              <p style={{ margin: '0 0 14px', fontSize: 11, color: 'var(--muted)', fontFamily: 'Lato', lineHeight: 1.5 }}>Does your win rate change after a losing streak?</p>
+              {patterns.streaks.map(s => (
+                <div key={s.after} style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10 }}>
+                  <span style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'Lato', width: 80, flexShrink: 0 }}>After {s.after} loss{s.after !== '0' && s.after !== '1' ? 'es' : s.after === '1' ? '' : 'es'}</span>
+                  <div style={{ flex: 1, height: 20, borderRadius: 5, background: 'var(--faint)', overflow: 'hidden', position: 'relative' }}>
+                    <div style={{ width: `${s.wr}%`, height: '100%', background: s.wr >= 50 ? '#22c55e' : '#f97316', borderRadius: 5 }} />
+                    <span style={{ position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)', fontSize: 10, fontWeight: 800, color: '#fff', fontFamily: 'Raleway' }}>{s.wr}%</span>
+                  </div>
+                  <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'Lato', width: 50, flexShrink: 0 }}>{s.count} trades</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ) : (
+        <div style={{ padding: 40, textAlign: 'center', color: 'var(--muted)', fontFamily: 'Lato' }}>Load trades first from the Dashboard tab.</div>
+      )}
     />
     </>
   )
