@@ -475,9 +475,90 @@ function buildTradingReviewEmail(r) {
 </body></html>`
 }
 
+// ── Evening task nudge (17:30) ───────────────────────────────────────────────
+async function runEveningNudge(date) {
+  console.log(`[cron] Running evening task nudge for ${date}…`)
+  try {
+    const res  = await fetch(`${APP_URL}/api/tasks`)
+    const tasks = await res.json()
+    if (!Array.isArray(tasks)) return
+
+    const open = tasks.filter(t => t.status === 'open' || t.status === 'in_progress')
+    const urgent = open.filter(t => t.priority === 'urgent')
+    const high   = open.filter(t => t.priority === 'high')
+    const rest   = open.filter(t => t.priority !== 'urgent' && t.priority !== 'high')
+
+    if (open.length === 0) {
+      console.log('[cron] Evening nudge: no open tasks — skipping email')
+      return
+    }
+
+    function taskRow(t) {
+      const pColor = { urgent: '#ff5c7a', high: '#ffcc66', medium: '#3dd6d0', low: '#27d98a' }[t.priority] || '#888'
+      const proj = t.project?.name ? `<span style="color:#888;font-size:11px"> · ${t.project.name}</span>` : ''
+      return `<tr>
+        <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb">
+          <span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${pColor};margin-right:8px"></span>
+          ${t.title}${proj}
+        </td>
+        <td style="padding:8px 12px;border-bottom:1px solid #e5e7eb;text-align:center;color:${pColor};font-weight:700;font-size:12px;text-transform:uppercase">${t.priority}</td>
+      </tr>`
+    }
+
+    const urgentRows = urgent.map(taskRow).join('')
+    const highRows   = high.map(taskRow).join('')
+    const restRows   = rest.slice(0, 8).map(taskRow).join('')
+
+    const html = `
+<div style="font-family:system-ui,sans-serif;max-width:600px;margin:0 auto;background:#fff;border-radius:12px;overflow:hidden;border:1px solid #e5e7eb">
+  <div style="background:linear-gradient(135deg,#134E4A,#0F766E);padding:24px 28px">
+    <h1 style="color:#fff;margin:0;font-size:20px;font-weight:800">Evening Check-in</h1>
+    <p style="color:rgba(255,255,255,0.8);margin:6px 0 0;font-size:14px">
+      ${open.length} open task${open.length !== 1 ? 's' : ''} · ${date} · mark what you completed today
+    </p>
+  </div>
+
+  <div style="padding:20px 28px">
+    <p style="margin:0 0 16px;color:#374151;font-size:14px">
+      Before you wind down — take 2 minutes to log what you finished and clear your head for tomorrow.
+      <a href="${APP_URL}" style="color:#0F766E;font-weight:700">Open PA →</a>
+    </p>
+
+    ${urgent.length > 0 ? `
+    <h3 style="margin:0 0 8px;font-size:13px;font-weight:800;color:#ff5c7a;text-transform:uppercase;letter-spacing:.05em">🔴 Urgent (${urgent.length})</h3>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:16px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">${urgentRows}</table>
+    ` : ''}
+
+    ${high.length > 0 ? `
+    <h3 style="margin:0 0 8px;font-size:13px;font-weight:800;color:#ffcc66;text-transform:uppercase;letter-spacing:.05em">🟡 High priority (${high.length})</h3>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:16px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">${highRows}</table>
+    ` : ''}
+
+    ${rest.length > 0 ? `
+    <h3 style="margin:0 0 8px;font-size:13px;font-weight:800;color:#6b7280;text-transform:uppercase;letter-spacing:.05em">Other open (${rest.length})</h3>
+    <table style="width:100%;border-collapse:collapse;margin-bottom:16px;border:1px solid #e5e7eb;border-radius:8px;overflow:hidden">${restRows}</table>
+    ${rest.length > 8 ? `<p style="color:#9ca3af;font-size:12px;margin:0">+${rest.length - 8} more not shown</p>` : ''}
+    ` : ''}
+
+    <div style="margin-top:20px;padding:16px;background:#f0fdf4;border-radius:8px;border-left:4px solid #22c55e">
+      <p style="margin:0;color:#166534;font-size:13px;font-weight:600">
+        Tip: press <strong>⌘+Shift+N</strong> anywhere in the app to add a task in under 3 seconds.
+      </p>
+    </div>
+  </div>
+</div>`
+
+    await sendEmail(`📋 Evening check-in — ${open.length} open tasks (${date})`, html)
+    console.log(`[cron] Evening nudge sent — ${open.length} tasks`)
+  } catch (e) {
+    console.error('[cron] Evening nudge failed:', e)
+  }
+}
+
 // ── Start ────────────────────────────────────────────────────────────────────
 console.log('[cron] Scheduler started')
 console.log('[cron]   Morning briefing:          first open 06:00–12:00')
+console.log('[cron]   Evening nudge:             17:30 daily')
 console.log('[cron]   Evening summary:           first open after 18:00')
 console.log('[cron]   Nightly scheduler cron:    21:00 daily')
 console.log('[cron]   Weekly habit digest:       20:00 Sunday')
@@ -486,6 +567,7 @@ console.log('[cron]   Weekly trading review:     19:00 Sunday')
 // Wait for Next.js before starting any scheduled tasks
 waitForNextJs().then(() => {
   scheduleWindow(6,  12, 'Morning Briefing',            date => runBriefing('morning', date))
+  scheduleDaily(17, 30,  'Evening Task Nudge',          date => runEveningNudge(date))
   scheduleWindow(18, 24, 'Evening Summary',             date => runBriefing('evening', date))
   scheduleDaily(21,  0,  'Nightly Scheduler + Cascade', date => runNightlyScheduler(date))
   scheduleDaily(20,  0,  'Weekly Habit Digest',         date => runHabitDigest(date))
