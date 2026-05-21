@@ -14,6 +14,20 @@ export async function POST(req: NextRequest) {
   const today = format(new Date(), 'yyyy-MM-dd')
   const tomorrow = format(addDays(new Date(), 1), 'yyyy-MM-dd')
 
+  // Fetch trading data early so it can inform the AI summary too
+  let tradingSummaryForPrompt = ''
+  try {
+    const tr = await fetch(`${process.env.NEXT_PUBLIC_APP_URL}/api/agents/trading/today`)
+    if (tr.ok) {
+      const td = await tr.json()
+      const s = td?.data?.summary
+      if (s && s.count > 0) {
+        const pnl = parseFloat(s.pnl || '0')
+        tradingSummaryForPrompt = `\n- Trading P&L: $${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)} (${s.count} trades, ${s.wins}W/${s.losses}L)`
+      }
+    }
+  } catch {}
+
   const prompt = `You are a personal assistant. Based on this evening check-in, do two things:
 
 1. Write a brief (2-3 sentence) AI summary of the person's day.
@@ -24,7 +38,7 @@ Check-in answers:
 - Blocked or pushed: ${answers.blocked_or_pushed}
 - New tasks that came up: ${answers.new_tasks}
 - Energy level: ${answers.energy_level}/5
-- Focus for tomorrow: ${answers.tomorrow_focus}
+- Focus for tomorrow: ${answers.tomorrow_focus}${tradingSummaryForPrompt}
 
 Respond in this exact JSON format:
 {
@@ -51,10 +65,15 @@ Respond in this exact JSON format:
     summary = raw.slice(0, 200)
   }
 
-  // Save journal entry
+  // Build trading note for journal (reuse data already fetched above)
+  const tradingNote = tradingSummaryForPrompt
+    ? `\n\n[Trading auto-fill:${tradingSummaryForPrompt.trim().replace('- Trading P&L:', 'P&L')}]`
+    : ''
+
+  // Save journal entry — append trading note to completed_today if trades happened
   await supabase.from('journal_entries').upsert({
     date: today,
-    completed_today: answers.completed_today,
+    completed_today: answers.completed_today + tradingNote,
     blocked_or_pushed: answers.blocked_or_pushed,
     new_tasks: answers.new_tasks,
     energy_level: answers.energy_level,
