@@ -172,13 +172,14 @@ export default function Sidebar() {
           {kResults.length > 0 && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto' }}>
               {kResults.map(r => (
-                <Link key={r.paper_id} href="/agents/knowledge" style={{ display: 'block', textDecoration: 'none', padding: '7px 9px', borderRadius: 8, background: 'var(--faint)', border: '1px solid var(--border)', transition: 'background .1s' }}
+                <a key={r.paper_id} href="/api/research-app" target="_blank" rel="noopener noreferrer"
+                  style={{ display: 'block', textDecoration: 'none', padding: '7px 9px', borderRadius: 8, background: 'var(--faint)', border: '1px solid var(--border)', transition: 'background .1s' }}
                   onMouseEnter={e => (e.currentTarget.style.background = 'var(--hover)')}
                   onMouseLeave={e => (e.currentTarget.style.background = 'var(--faint)')}>
                   <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', fontFamily: 'Raleway, sans-serif', lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</div>
                   <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'Lato, sans-serif', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.snippet?.slice(0, 60)}</div>
-                  <div style={{ fontSize: 9, color: 'var(--brand)', fontWeight: 700, marginTop: 2 }}>{Math.round(r.score * 100)}% match</div>
-                </Link>
+                  <div style={{ fontSize: 9, color: 'var(--brand)', fontWeight: 700, marginTop: 2 }}>{r.score}% match</div>
+                </a>
               ))}
             </div>
           )}
