@@ -5,6 +5,27 @@ import AgentPageLayout from '@/components/agents/AgentPageLayout'
 
 const COLOR = '#9D174D'
 
+const DEFAULT_DIGEST_PROMPT = `You are an expert academic paper summarizer specializing in temporal networks, graph machine learning, critical transitions, and early warning signals.
+
+Given a paper, extract ALL of the following. Respond ONLY in this exact JSON format:
+{
+  "summary": "2-3 sentence plain-language summary of the core contribution",
+  "key_findings": ["finding 1", "finding 2", "finding 3", "finding 4"],
+  "methodology": "1 sentence describing the research design and approach",
+  "relevance_note": "1-2 sentences on relevance to temporal networks / critical transitions / early warning signals / graph ML",
+  "dissertation_relevance": 4,
+  "tags": ["tag1", "tag2", "tag3", "tag4", "tag5"],
+  "category": "one of: Temporal Networks | Graph ML | Critical Transitions | Early Warning Signals | Data Fusion | Representativeness | Methodology | Other",
+  "themes": ["theme1", "theme2", "theme3"]
+}
+
+Rules:
+- tags: 5-8 short lowercase keywords specific to this paper (e.g. "link prediction", "rolling window", "bifurcation")
+- category: pick the SINGLE best fit from the fixed list above
+- themes: 2-4 broader research themes this paper touches (e.g. "network dynamics", "anomaly detection")
+- dissertation_relevance: 1-5 score for relevance to a dissertation on representativeness and data fusion in temporal networks
+- Never return null fields — use empty array [] if truly nothing fits`
+
 interface Paper { id: string; title: string; authors: string; year: number; summary: string | null; tags: string[]; dissertation_relevance: number | null; notes: string | null }
 interface Project { id: string; name: string; color: string; digest_prompt: string | null }
 interface JobProgress { type: string; processed?: number; total?: number; current?: string; title?: string; reason?: string; job_id?: string; failed?: string[] }
@@ -47,7 +68,8 @@ export default function DigesterAgentPage() {
   // ── Sync prompt draft when settings project changes ────────────────────────
   useEffect(() => {
     const proj = projects.find(p => p.id === settingsProjectId)
-    setPromptDraft(proj?.digest_prompt ?? '')
+    // Pre-populate with default so users have a starting point to edit from
+    setPromptDraft(proj?.digest_prompt ?? DEFAULT_DIGEST_PROMPT)
     setPromptSaved(false)
   }, [settingsProjectId, projects])
 
@@ -444,7 +466,7 @@ export default function DigesterAgentPage() {
           <textarea
             value={promptDraft}
             onChange={e => { setPromptDraft(e.target.value); setPromptSaved(false) }}
-            placeholder={`Leave blank to use the default prompt.\n\nExample:\nYou are an expert academic paper summarizer specializing in machine learning for climate science.\n\nGiven a paper, extract ALL of the following. Respond ONLY in this exact JSON format:\n{\n  "summary": "...",\n  "key_findings": [...],\n  ...\n}`}
+            placeholder="Edit the prompt above to customise it for this project…"
             rows={14}
             style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--faint)', color: 'var(--text)', fontFamily: 'monospace', fontSize: 12, outline: 'none', resize: 'vertical', lineHeight: 1.6, boxSizing: 'border-box' }}
           />
@@ -461,9 +483,20 @@ export default function DigesterAgentPage() {
           >
             {savingPrompt ? <><RefreshCw size={14} style={{ animation: 'spin .8s linear infinite' }} /> Saving…</> : <><Save size={14} /> Save Prompt</>}
           </button>
-          {!promptDraft && settingsProjectId && (
+          {settingsProject?.digest_prompt && settingsProjectId && (
             <button
-              onClick={() => { setPromptDraft(''); savePrompt() }}
+              onClick={async () => {
+                setPromptDraft(DEFAULT_DIGEST_PROMPT)
+                setSavingPrompt(true)
+                await fetch('/api/agents/paper-digester', {
+                  method: 'POST', headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'save_project_prompt', params: { project_id: settingsProjectId, prompt: null } }),
+                })
+                setProjects(ps => ps.map(p => p.id === settingsProjectId ? { ...p, digest_prompt: null } : p))
+                setSavingPrompt(false)
+                setPromptSaved(true)
+                setTimeout(() => setPromptSaved(false), 2500)
+              }}
               style={{ padding: '10px 16px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--faint)', color: 'var(--muted)', fontFamily: 'Raleway', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}
             >
               Reset to default
