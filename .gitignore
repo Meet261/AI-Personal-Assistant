@@ -54,3 +54,4 @@ PIPELINE_LOG.md
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+test-results/
