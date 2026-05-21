@@ -119,9 +119,52 @@ export async function executeHabitAction(action: string, params: Record<string, 
     }
     case 'get_weekly_summary': {
       const since = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10)
-      const { data } = await supabase.from('habit_logs')
-        .select('date,completed,habit:habits(name)').gte('date', since).order('date')
-      return { ok: true, message: 'Weekly habit summary', data }
+      const today = new Date().toISOString().slice(0, 10)
+
+      const [{ data: habits }, { data: logs }] = await Promise.all([
+        supabase.from('habits').select('id,name,color').eq('active', true),
+        supabase.from('habit_logs').select('habit_id,date,completed').gte('date', since).order('date'),
+      ])
+
+      const logsByHabit = new Map<string, Map<string, boolean>>()
+      for (const l of logs ?? []) {
+        if (!logsByHabit.has(l.habit_id)) logsByHabit.set(l.habit_id, new Map())
+        logsByHabit.get(l.habit_id)!.set(l.date, l.completed)
+      }
+
+      // Build per-habit stats
+      const habitStats = (habits ?? []).map(h => {
+        const datesMap = logsByHabit.get(h.id) ?? new Map()
+        const completedCount = [...datesMap.values()].filter(Boolean).length
+
+        // Streak: consecutive completed days ending today or yesterday
+        let streak = 0
+        const check = new Date(today)
+        for (let i = 0; i < 30; i++) {
+          const d = check.toISOString().slice(0, 10)
+          if (datesMap.get(d) === true) { streak++; check.setDate(check.getDate() - 1) }
+          else if (i === 0) { check.setDate(check.getDate() - 1) } // allow today not yet logged
+          else break
+        }
+
+        return { name: h.name, streak, done_today: datesMap.get(today) === true, completed_count: completedCount }
+      })
+
+      const totalSlots = (habits?.length ?? 0) * 7
+      const completedSlots = [...logsByHabit.values()].reduce((s, m) => s + [...m.values()].filter(Boolean).length, 0)
+      const completion_rate = totalSlots > 0 ? Math.round((completedSlots / totalSlots) * 100) : 0
+      const best_streak = habitStats.reduce((max, h) => Math.max(max, h.streak), 0)
+
+      return {
+        ok: true,
+        message: 'Weekly habit summary',
+        data: {
+          total_habits: habits?.length ?? 0,
+          completion_rate,
+          best_streak,
+          habits: habitStats,
+        },
+      }
     }
 
     case 'send_weekly_digest': {
