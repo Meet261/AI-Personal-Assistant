@@ -1,6 +1,6 @@
 'use client'
 import { useState, useEffect, useCallback } from 'react'
-import { TrendingUp, RefreshCw, Activity, DollarSign, Target, BarChart3, Shield, Play, Square } from 'lucide-react'
+import { TrendingUp, RefreshCw, Activity, DollarSign, Target, BarChart3, Shield, Play, Square, X, CheckCircle2, AlertTriangle } from 'lucide-react'
 import AgentPageLayout from '@/components/agents/AgentPageLayout'
 
 const COLOR = '#B45309'
@@ -82,6 +82,25 @@ export default function TradingAgentPage() {
   // null = unknown (loading), true/false = confirmed from API
   const [agentRunning, setAgentRunning] = useState<boolean | null>(null)
   const [controlling, setControlling] = useState(false)
+
+  // ── Pre-session gate ──────────────────────────────────────────────────────
+  const [showGate, setShowGate]       = useState(false)
+  const [gateMood, setGateMood]       = useState(0)          // 1-5
+  const [gatePlan, setGatePlan]       = useState('')
+  const [gateMaxLoss, setGateMaxLoss] = useState('')
+  const [gateNews, setGateNews]       = useState(false)
+  const [gateDrawdown, setGateDrawdown] = useState(false)
+
+  function gatePassedToday() {
+    const today = new Date().toISOString().slice(0, 10)
+    return localStorage.getItem(`trading_gate_${today}`) === 'passed'
+  }
+  function markGatePassed() {
+    const today = new Date().toISOString().slice(0, 10)
+    localStorage.setItem(`trading_gate_${today}`, 'passed')
+  }
+  const gateComplete = gateMood > 0 && gatePlan.trim().length > 0
+    && gateMaxLoss.trim().length > 0 && gateNews && gateDrawdown
 
   const setAndCacheRunning = useCallback((v: boolean) => {
     setAgentRunning(v)
@@ -189,7 +208,7 @@ export default function TradingAgentPage() {
               <Square size={11} fill="#dc2626" /> Stop
             </button>
           ) : (
-            <button onClick={() => controlAgent('start')} disabled={controlling} style={{
+            <button onClick={() => { if (gatePassedToday()) { controlAgent('start') } else { setShowGate(true) } }} disabled={controlling} style={{
               display: 'flex', alignItems: 'center', gap: 5, padding: '6px 14px', borderRadius: 8,
               background: '#22c55e15', border: '1px solid #22c55e40', color: '#16a34a',
               cursor: 'pointer', fontFamily: 'Raleway', fontWeight: 700, fontSize: 12,
@@ -399,14 +418,117 @@ export default function TradingAgentPage() {
     </div>
   )
 
+  const MOODS = ['😫', '😟', '😐', '🙂', '😊']
+  const currentDrawdown = summary ? Math.abs(Math.min(0, summary.total_pnl)) : 0
+
+  const gateModal = showGate && (
+    <div onClick={() => setShowGate(false)} style={{ position: 'fixed', inset: 0, zIndex: 1000, background: 'rgba(10,20,30,0.65)', backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: 'min(520px,96vw)', background: 'var(--panel)', borderRadius: 20, border: `1px solid ${COLOR}40`, boxShadow: `0 28px 72px rgba(0,0,0,0.4)`, overflow: 'hidden' }}>
+
+        {/* Header */}
+        <div style={{ background: `${COLOR}12`, padding: '20px 24px 16px', borderBottom: `1px solid ${COLOR}20` }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
+            <Shield size={18} color={COLOR} />
+            <span style={{ fontFamily: 'Raleway', fontWeight: 900, fontSize: 16, color: 'var(--text)' }}>Pre-Session Checklist</span>
+            <button type="button" onClick={() => setShowGate(false)} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', lineHeight: 0, padding: 4 }}><X size={15} /></button>
+          </div>
+          <p style={{ margin: 0, fontSize: 12, color: 'var(--muted)', fontFamily: 'Lato' }}>Answer all 5 questions before the session starts. This takes 30 seconds and saves you from emotional trades.</p>
+        </div>
+
+        <div style={{ padding: '20px 24px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+
+          {/* Q1: Mood */}
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', fontFamily: 'Raleway', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 10 }}>
+              1 · How are you feeling right now?
+            </label>
+            <div style={{ display: 'flex', gap: 10 }}>
+              {MOODS.map((emoji, i) => (
+                <button key={i} type="button" onClick={() => setGateMood(i + 1)} style={{ flex: 1, padding: '10px 4px', borderRadius: 10, border: `2px solid ${gateMood === i + 1 ? COLOR : 'var(--border)'}`, background: gateMood === i + 1 ? `${COLOR}15` : 'var(--faint)', fontSize: 22, cursor: 'pointer', transition: 'all .12s' }}>
+                  {emoji}
+                </button>
+              ))}
+            </div>
+            {gateMood > 0 && gateMood <= 2 && (
+              <p style={{ margin: '8px 0 0', fontSize: 11, color: '#f97316', fontFamily: 'Lato' }}>⚠ Low mood detected — consider reducing position size today.</p>
+            )}
+          </div>
+
+          {/* Q2: Drawdown awareness */}
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', fontFamily: 'Raleway', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 10 }}>
+              2 · Drawdown awareness
+            </label>
+            <div style={{ padding: '12px 14px', borderRadius: 10, background: totalPnl < 0 ? '#ef444410' : '#22c55e10', border: `1px solid ${totalPnl < 0 ? '#ef444440' : '#22c55e40'}`, marginBottom: 10 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: totalPnl < 0 ? '#dc2626' : '#16a34a', fontFamily: 'Raleway' }}>
+                Overall P&L: {totalPnl >= 0 ? '+' : ''}{totalPnl.toFixed(2)} · Today: {todayPnl >= 0 ? '+' : ''}{todayPnl.toFixed(2)}
+              </span>
+            </div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+              <input type="checkbox" checked={gateDrawdown} onChange={e => setGateDrawdown(e.target.checked)} style={{ width: 16, height: 16, cursor: 'pointer' }} />
+              <span style={{ fontSize: 13, color: 'var(--text)', fontFamily: 'Lato' }}>I am aware of my current drawdown and within my risk limits</span>
+            </label>
+          </div>
+
+          {/* Q3: Today's plan */}
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', fontFamily: 'Raleway', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 8 }}>
+              3 · What is your plan for this session?
+            </label>
+            <textarea value={gatePlan} onChange={e => setGatePlan(e.target.value)} rows={2} placeholder="e.g. XAUUSD trend follow on 1H, wait for London open, no revenge trading…" style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--faint)', color: 'var(--text)', fontFamily: 'Lato', fontSize: 13, outline: 'none', resize: 'none', boxSizing: 'border-box', lineHeight: 1.5 }} />
+          </div>
+
+          {/* Q4: Max loss */}
+          <div>
+            <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', fontFamily: 'Raleway', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 8 }}>
+              4 · Max loss limit for this session ($)
+            </label>
+            <input type="number" value={gateMaxLoss} onChange={e => setGateMaxLoss(e.target.value)} placeholder="e.g. 50" min="0" style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--faint)', color: 'var(--text)', fontFamily: 'Lato', fontSize: 13, outline: 'none', boxSizing: 'border-box' }} />
+          </div>
+
+          {/* Q5: News check */}
+          <div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
+              <input type="checkbox" checked={gateNews} onChange={e => setGateNews(e.target.checked)} style={{ width: 16, height: 16, cursor: 'pointer' }} />
+              <span style={{ fontSize: 13, color: 'var(--text)', fontFamily: 'Lato' }}>
+                <strong>5 ·</strong> I have checked the economic calendar for high-impact news events today
+              </span>
+            </label>
+          </div>
+        </div>
+
+        {/* Footer */}
+        <div style={{ padding: '14px 24px 20px', borderTop: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'Lato' }}>
+            {gateComplete ? <span style={{ color: '#22c55e', fontWeight: 700 }}>✓ All checks complete</span> : `${[gateMood > 0, gateDrawdown, gatePlan.trim().length > 0, gateMaxLoss.trim().length > 0, gateNews].filter(Boolean).length} / 5 complete`}
+          </div>
+          <button
+            type="button"
+            disabled={!gateComplete || controlling}
+            onClick={() => {
+              markGatePassed()
+              setShowGate(false)
+              controlAgent('start')
+            }}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 22px', borderRadius: 11, border: 'none', background: gateComplete ? COLOR : 'var(--faint)', color: gateComplete ? '#fff' : 'var(--muted)', fontFamily: 'Raleway', fontWeight: 800, fontSize: 13, cursor: gateComplete ? 'pointer' : 'not-allowed', transition: 'all .15s', opacity: gateComplete ? 1 : 0.6 }}
+          >
+            <Play size={13} fill={gateComplete ? '#fff' : 'var(--muted)'} /> Start Session
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+
   return (
-    <AgentPageLayout
-      agentId="trading"
-      agentName="Trading Agent"
-      agentColor={COLOR}
-      agentIcon={<TrendingUp size={20} />}
-      description="P&L analytics, risk monitoring & trade history"
-      tabs={['dashboard', 'today', 'actions', 'chat', 'settings']}
+    <>
+      {gateModal}
+      <AgentPageLayout
+        agentId="trading"
+        agentName="Trading Agent"
+        agentColor={COLOR}
+        agentIcon={<TrendingUp size={20} />}
+        description="P&L analytics, risk monitoring & trade history"
+        tabs={['dashboard', 'today', 'actions', 'chat', 'settings']}
       starters={[
         'How did trading go today?',
         'What is my current win rate?',
@@ -420,5 +542,6 @@ export default function TradingAgentPage() {
       settings={settings}
       commandCenter={commandCenter}
     />
+    </>
   )
 }
