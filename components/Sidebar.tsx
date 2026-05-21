@@ -1,13 +1,15 @@
 'use client'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef, useCallback } from 'react'
 import {
   LayoutDashboard, FolderKanban, CheckSquare,
   BookOpen, Sunrise, Moon,
-  Leaf, Command, Timer, Layers, Flame, Activity, BarChart2,
+  Leaf, Command, Timer, Layers, Flame, Activity, BarChart2, Brain, X, Search,
 } from 'lucide-react'
 import { useCmdK } from './CmdKProvider'
+
+interface KnowledgeResult { title: string; authors: string; year: string; snippet: string; score: number; paper_id: string }
 
 const nav = [
   { href: '/',                 label: 'Dashboard',      icon: LayoutDashboard },
@@ -34,6 +36,45 @@ export default function Sidebar() {
   const { setOpen, theme, setTheme, morning, evening } = useCmdK()
   const anyGenerating = morning.streaming || evening.streaming
   const [ollamaOk, setOllamaOk] = useState(false)
+  const [kOpen, setKOpen]       = useState(false)
+  const [kQuery, setKQuery]     = useState('')
+  const [kResults, setKResults] = useState<KnowledgeResult[]>([])
+  const [kSearching, setKSearching] = useState(false)
+  const kInputRef = useRef<HTMLInputElement>(null)
+  const kDebounce = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const kSearch = useCallback(async (q: string) => {
+    if (!q.trim()) { setKResults([]); return }
+    setKSearching(true)
+    const res = await fetch('/api/knowledge', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'search_knowledge', params: { query: q, top_k: 5 } }),
+    }).then(r => r.json()).catch(() => null)
+    setKResults(res?.data ?? [])
+    setKSearching(false)
+  }, [])
+
+  useEffect(() => {
+    if (kDebounce.current) clearTimeout(kDebounce.current)
+    kDebounce.current = setTimeout(() => kSearch(kQuery), 400)
+    return () => { if (kDebounce.current) clearTimeout(kDebounce.current) }
+  }, [kQuery, kSearch])
+
+  useEffect(() => {
+    if (kOpen) requestAnimationFrame(() => kInputRef.current?.focus())
+    else { setKQuery(''); setKResults([]) }
+  }, [kOpen])
+
+  // Global Ctrl+Shift+K shortcut
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault(); setKOpen(o => !o)
+      }
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [])
 
   useEffect(() => {
     let cancelled = false
@@ -86,24 +127,69 @@ export default function Sidebar() {
       </div>
 
       {/* ── Cmd+K Search ── */}
-      <div style={{ padding: '12px 14px 8px' }}>
-        <button onClick={() => setOpen(true)} style={{
-          width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-          padding: '9px 12px', borderRadius: 10,
-          background: 'var(--faint)', border: '1px solid var(--border)',
-          cursor: 'pointer', transition: 'all .15s',
-        }}
-          onMouseEnter={e => { const el = e.currentTarget; el.style.borderColor = 'var(--brand2)'; el.style.background = 'var(--faint2)' }}
-          onMouseLeave={e => { const el = e.currentTarget; el.style.borderColor = 'var(--border)'; el.style.background = 'var(--faint)' }}>
-          <Command size={13} style={{ color: 'var(--muted)', flexShrink: 0 }} />
-          <span style={{ fontFamily: 'Lato, sans-serif', fontSize: 12, color: 'var(--subtle)', flex: 1, textAlign: 'left' }}>
-            Search or add task…
-          </span>
-          <kbd style={{ fontSize: 10, fontFamily: 'monospace', background: 'var(--faint2)', border: '1px solid var(--border)', borderRadius: 5, padding: '1px 5px', color: 'var(--muted)', flexShrink: 0 }}>
-            ⌘K
-          </kbd>
-        </button>
+      <div style={{ padding: '12px 14px 6px' }}>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={() => setOpen(true)} style={{
+            flex: 1, display: 'flex', alignItems: 'center', gap: 8,
+            padding: '9px 12px', borderRadius: 10,
+            background: 'var(--faint)', border: '1px solid var(--border)',
+            cursor: 'pointer', transition: 'all .15s',
+          }}
+            onMouseEnter={e => { const el = e.currentTarget; el.style.borderColor = 'var(--brand2)'; el.style.background = 'var(--faint2)' }}
+            onMouseLeave={e => { const el = e.currentTarget; el.style.borderColor = 'var(--border)'; el.style.background = 'var(--faint)' }}>
+            <Command size={13} style={{ color: 'var(--muted)', flexShrink: 0 }} />
+            <span style={{ fontFamily: 'Lato, sans-serif', fontSize: 12, color: 'var(--subtle)', flex: 1, textAlign: 'left' }}>
+              Search or add task…
+            </span>
+            <kbd style={{ fontSize: 10, fontFamily: 'monospace', background: 'var(--faint2)', border: '1px solid var(--border)', borderRadius: 5, padding: '1px 5px', color: 'var(--muted)', flexShrink: 0 }}>⌘K</kbd>
+          </button>
+          {/* Knowledge search toggle */}
+          <button onClick={() => setKOpen(o => !o)} title="Knowledge search (Ctrl+Shift+K)" style={{
+            padding: '9px 10px', borderRadius: 10, border: `1px solid ${kOpen ? 'var(--brand2)' : 'var(--border)'}`,
+            background: kOpen ? 'var(--active)' : 'var(--faint)', cursor: 'pointer', transition: 'all .15s', flexShrink: 0, lineHeight: 0,
+          }}>
+            <Brain size={13} style={{ color: kOpen ? 'var(--brand)' : 'var(--muted)' }} />
+          </button>
+        </div>
       </div>
+
+      {/* ── Knowledge search panel ── */}
+      {kOpen && (
+        <div style={{ padding: '0 14px 8px', borderBottom: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 10px', borderRadius: 9, border: '1px solid var(--brand2)', background: 'var(--faint)', marginBottom: 6 }}>
+            <Search size={11} color="var(--brand)" />
+            <input
+              ref={kInputRef}
+              value={kQuery}
+              onChange={e => setKQuery(e.target.value)}
+              placeholder="Search papers…"
+              style={{ flex: 1, background: 'none', border: 'none', outline: 'none', fontSize: 12, color: 'var(--text)', fontFamily: 'Lato, sans-serif' }}
+              onKeyDown={e => { if (e.key === 'Escape') setKOpen(false) }}
+            />
+            {kSearching && <div style={{ width: 10, height: 10, borderRadius: '50%', border: '2px solid var(--brand)', borderTopColor: 'transparent', animation: 'kSpin .6s linear infinite', flexShrink: 0 }} />}
+            {kQuery && <button onClick={() => setKQuery('')} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 0, lineHeight: 0 }}><X size={11} /></button>}
+          </div>
+          {kResults.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto' }}>
+              {kResults.map(r => (
+                <Link key={r.paper_id} href="/agents/knowledge" style={{ display: 'block', textDecoration: 'none', padding: '7px 9px', borderRadius: 8, background: 'var(--faint)', border: '1px solid var(--border)', transition: 'background .1s' }}
+                  onMouseEnter={e => (e.currentTarget.style.background = 'var(--hover)')}
+                  onMouseLeave={e => (e.currentTarget.style.background = 'var(--faint)')}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text)', fontFamily: 'Raleway, sans-serif', lineHeight: 1.3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.title}</div>
+                  <div style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'Lato, sans-serif', marginTop: 3, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.snippet?.slice(0, 60)}</div>
+                  <div style={{ fontSize: 9, color: 'var(--brand)', fontWeight: 700, marginTop: 2 }}>{Math.round(r.score * 100)}% match</div>
+                </Link>
+              ))}
+            </div>
+          )}
+          {kQuery && !kSearching && kResults.length === 0 && (
+            <p style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'Lato, sans-serif', margin: '4px 0', textAlign: 'center' }}>No results</p>
+          )}
+          {!kQuery && (
+            <p style={{ fontSize: 10, color: 'var(--muted)', fontFamily: 'Lato, sans-serif', margin: '4px 2px' }}>Semantic search across 42 papers · Ctrl+Shift+K</p>
+          )}
+        </div>
+      )}
 
       {/* ── Nav ── */}
       <nav style={{ flex: 1, padding: '4px 10px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -187,7 +273,7 @@ export default function Sidebar() {
         </div>
       </div>
     </aside>
-    <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }`}</style>
+    <style>{`@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} } @keyframes kSpin { to { transform: rotate(360deg) } }`}</style>
     </>
   )
 }
