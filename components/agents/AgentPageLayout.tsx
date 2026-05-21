@@ -1,6 +1,6 @@
 'use client'
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
-import { Send, X, Loader2, Bot, User, ChevronRight, MessageSquare, LayoutDashboard, Zap, History, Settings, Terminal, Eye, EyeOff, Trash2, Activity, PlusCircle, Clock, ChevronLeft } from 'lucide-react'
+import { Send, X, Loader2, Bot, User, ChevronRight, MessageSquare, LayoutDashboard, Zap, History, Settings, Terminal, Eye, EyeOff, Trash2, Activity, PlusCircle, Clock, ChevronLeft, BookMarked } from 'lucide-react'
 import { useAgentChat, type ChatMessage } from './useAgentChat'
 
 const S = { fontFamily: 'Raleway, sans-serif' }
@@ -46,7 +46,7 @@ function MarkdownContent({ text, isUser }: { text: string; isUser: boolean }) {
   return <>{els}</>
 }
 
-export type AgentTab = 'dashboard' | 'today' | 'actions' | 'chat' | 'history' | 'settings'
+export type AgentTab = 'dashboard' | 'today' | 'actions' | 'chat' | 'history' | 'settings' | 'queue'
 
 interface Props {
   agentId: string
@@ -61,6 +61,7 @@ interface Props {
   actions?: React.ReactNode
   history?: React.ReactNode
   settings?: React.ReactNode
+  queue?: React.ReactNode
   commandCenter?: React.ReactNode
 }
 
@@ -71,13 +72,14 @@ const TAB_META: Record<AgentTab, { label: string; icon: React.ElementType }> = {
   chat:      { label: 'Chat',      icon: MessageSquare },
   history:   { label: 'History',   icon: History },
   settings:  { label: 'Settings',  icon: Settings },
+  queue:     { label: 'Queue',     icon: BookMarked },
 }
 
 interface Session { id: string; title?: string; started_at: string; message_count?: number; agent_id: string }
 
 export default function AgentPageLayout({
   agentId, agentName, agentColor, agentIcon, description,
-  tabs, starters = [], dashboard, today, actions, history, settings, commandCenter,
+  tabs, starters = [], dashboard, today, actions, history, settings, queue, commandCenter,
 }: Props) {
   const [activeTab, setActiveTab] = useState<AgentTab>(tabs[0] ?? 'dashboard')
   const [chatOpen, setChatOpen] = useState(false)
@@ -226,6 +228,7 @@ export default function AgentPageLayout({
           {activeTab === 'actions' && actions}
           {activeTab === 'history' && history}
           {activeTab === 'settings' && settings}
+          {activeTab === 'queue' && queue}
           {activeTab === 'chat' && (
             <div style={{ maxWidth: 720, margin: '0 auto' }}>
               <ChatView
