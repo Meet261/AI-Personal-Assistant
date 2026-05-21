@@ -4,6 +4,7 @@ import Sidebar from '@/components/Sidebar'
 import CmdKProvider from '@/components/CmdKProvider'
 import QuickAddTask from '@/components/QuickAddTask'
 import QuickTaskAction from '@/components/QuickTaskAction'
+import FocusMode from '@/components/FocusMode'
 
 export const metadata: Metadata = {
   title: 'Personal OS',
@@ -21,6 +22,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           </main>
           <QuickAddTask />
           <QuickTaskAction />
+          <FocusMode />
         </CmdKProvider>
       </body>
     </html>

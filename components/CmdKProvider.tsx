@@ -38,6 +38,9 @@ interface CmdKCtx {
   setAgentMessages: React.Dispatch<React.SetStateAction<AgentMessage[]>>
   agentSessionId: string | null
   setAgentSessionId: (id: string | null) => void
+  // Focus mode
+  focusMode: boolean
+  setFocusMode: (v: boolean) => void
 }
 
 const Ctx = createContext<CmdKCtx>({
@@ -46,6 +49,7 @@ const Ctx = createContext<CmdKCtx>({
   generateBriefing: async () => {}, clearBriefing: () => {},
   agentMessages: [], setAgentMessages: () => {},
   agentSessionId: null, setAgentSessionId: () => {},
+  focusMode: false, setFocusMode: () => {},
 })
 
 export function useCmdK() { return useContext(Ctx) }
@@ -58,6 +62,7 @@ export default function CmdKProvider({ children }: { children: React.ReactNode }
   // Agent state — lives here so it persists when user navigates away from /agent
   const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([])
   const [agentSessionId, setAgentSessionId] = useState<string | null>(null)
+  const [focusMode, setFocusMode] = useState(false)
   // Track active abort controllers so we can cancel on demand
   const abortRefs = useRef<{ morning?: AbortController; evening?: AbortController }>({})
 
@@ -157,7 +162,7 @@ export default function CmdKProvider({ children }: { children: React.ReactNode }
   }, [])
 
   return (
-    <Ctx.Provider value={{ open, setOpen, theme, setTheme, morning, evening, generateBriefing, clearBriefing, agentMessages, setAgentMessages, agentSessionId, setAgentSessionId }}>
+    <Ctx.Provider value={{ open, setOpen, theme, setTheme, morning, evening, generateBriefing, clearBriefing, agentMessages, setAgentMessages, agentSessionId, setAgentSessionId, focusMode, setFocusMode }}>
       {children}
       {open && <CommandPalette onClose={() => setOpen(false)} />}
     </Ctx.Provider>
