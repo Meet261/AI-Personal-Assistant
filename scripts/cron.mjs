@@ -35,6 +35,20 @@ const NOTIFY_EMAIL = process.env.BRIEFING_NOTIFY_EMAIL || GMAIL_USER
 
 function pad(n) { return String(n).padStart(2, '0') }
 
+// Wait until Next.js is accepting requests before starting any scheduled tasks
+async function waitForNextJs(maxWaitMs = 60_000) {
+  const start = Date.now()
+  while (Date.now() - start < maxWaitMs) {
+    try {
+      const res = await fetch(`${APP_URL}/api/system/health`, { signal: AbortSignal.timeout(2000) })
+      if (res.ok) { console.log('[cron] Next.js ready'); return true }
+    } catch { /* not ready yet */ }
+    await new Promise(r => setTimeout(r, 3000))
+  }
+  console.warn('[cron] Next.js did not become ready in time — proceeding anyway')
+  return false
+}
+
 // Fires at an exact hour:minute each day (used for scheduler + habit digest)
 function scheduleDaily(hour, minute, label, fn) {
   let firedToday = false
@@ -66,7 +80,7 @@ function scheduleWindow(startHour, endHour, label, fn) {
   let firedToday = false
   let lastDate   = ''
 
-  function tick() {
+  async function tick() {
     const now  = new Date()
     const date = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`
     const h    = now.getHours()
@@ -75,9 +89,14 @@ function scheduleWindow(startHour, endHour, label, fn) {
     if (date !== lastDate) { firedToday = false; lastDate = date }
 
     if (h >= startHour && h < endHour && !firedToday) {
-      firedToday = true
       console.log(`[cron] ${pad(h)}:00 window — running: ${label}`)
-      fn(date).catch(e => console.error(`[cron] ${label} failed:`, e))
+      try {
+        await fn(date)
+        firedToday = true  // only mark done on success — retries if it fails
+      } catch (e) {
+        console.error(`[cron] ${label} failed (will retry next tick):`, e)
+        // firedToday stays false — will retry in 30s
+      }
     }
 
     setTimeout(tick, 30_000)
@@ -464,8 +483,11 @@ console.log('[cron]   Nightly scheduler cron:    21:00 daily')
 console.log('[cron]   Weekly habit digest:       20:00 Sunday')
 console.log('[cron]   Weekly trading review:     19:00 Sunday')
 
-scheduleWindow(6,  12, 'Morning Briefing',                date => runBriefing('morning', date))
-scheduleWindow(18, 24, 'Evening Summary',                 date => runBriefing('evening', date))
-scheduleDaily(21,  0,  'Nightly Scheduler + Cascade',     date => runNightlyScheduler(date))
-scheduleDaily(20,  0,  'Weekly Habit Digest',             date => runHabitDigest(date))
-scheduleDaily(19,  0,  'Weekly Trading Review',           date => runWeeklyTradingReview(date))
+// Wait for Next.js before starting any scheduled tasks
+waitForNextJs().then(() => {
+  scheduleWindow(6,  12, 'Morning Briefing',            date => runBriefing('morning', date))
+  scheduleWindow(18, 24, 'Evening Summary',             date => runBriefing('evening', date))
+  scheduleDaily(21,  0,  'Nightly Scheduler + Cascade', date => runNightlyScheduler(date))
+  scheduleDaily(20,  0,  'Weekly Habit Digest',         date => runHabitDigest(date))
+  scheduleDaily(19,  0,  'Weekly Trading Review',       date => runWeeklyTradingReview(date))
+})

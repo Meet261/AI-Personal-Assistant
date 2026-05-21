@@ -64,13 +64,21 @@ async function generateBriefing(prompt: string): Promise<{ content: string; top_
 }
 
 // Wrap in SSE stream so existing client code works unchanged
-function streamBriefing(prompt: string): ReadableStream<Uint8Array> {
+async function generateAndSaveBriefing(prompt: string, date: string, type: string) {
+  const result = await generateBriefing(prompt)
+  const { error } = await supabase.from('daily_briefings').upsert(
+    { date, type, content: result.content, top_priorities: result.top_priorities },
+    { onConflict: 'date,type' }
+  )
+  if (error) console.error('[briefing] save error:', error.message)
+  return result
+}
+
+function streamBriefing(content: string, top_priorities: string[]): ReadableStream<Uint8Array> {
   const encoder = new TextEncoder()
   return new ReadableStream({
     async start(controller) {
       try {
-        const { content, top_priorities } = await generateBriefing(prompt)
-        // Stream content word-by-word for a typing effect
         const words = content.split(' ')
         for (let i = 0; i < words.length; i++) {
           const token = (i === 0 ? '' : ' ') + words[i]
@@ -233,7 +241,8 @@ Do NOT list the priorities inside the paragraphs. After the paragraphs, output t
 PRIORITIES_JSON: ["priority 1", "priority 2", "priority 3"]`
   }
 
-  const stream = streamBriefing(prompt)
+  const { content, top_priorities } = await generateAndSaveBriefing(prompt, targetDate, type)
+  const stream = streamBriefing(content, top_priorities)
 
   // After streaming completes we need to save to DB — we do this by wrapping the stream
   // and intercepting the done event on the client side via a separate save call.
