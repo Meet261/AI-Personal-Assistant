@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react'
 import {
   LayoutDashboard, FolderKanban, CheckSquare,
   BookOpen, Sunrise, Moon,
-  Leaf, Command, Timer, Layers, Flame, Activity,
+  Leaf, Command, Timer, Layers, Flame, Activity, BarChart2,
 } from 'lucide-react'
 import { useCmdK } from './CmdKProvider'
 
@@ -20,6 +20,7 @@ const nav = [
   { href: '/agents/habit-tracker', label: 'Habits',         icon: Flame },
   { href: '/agents/trace',         label: 'Routing Trace',  icon: Activity },
   { href: '/timer',                label: 'Work Timer',     icon: Timer },
+  { href: '/review',               label: 'Weekly Review',  icon: BarChart2 },
 ]
 
 type Theme = 'nordic' | 'midnight' | 'calm' | 'paper'
