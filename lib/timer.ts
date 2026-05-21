@@ -9,6 +9,7 @@ export interface ActiveSession {
   pauses: { from: number; to: number }[]
   isPaused: boolean
   pausedAt: number | null
+  estimateMs?: number | null           // user-provided estimate in ms
 }
 
 export interface TimeSession {
@@ -20,6 +21,7 @@ export interface TimeSession {
   end: number
   duration: number                     // ms
   date: string                         // YYYY-MM-DD
+  estimateMs?: number | null           // estimate set at session start
 }
 
 export function loadSessions(): TimeSession[] {
@@ -67,6 +69,7 @@ export function commitSession(active: ActiveSession): TimeSession | null {
     end: now,
     duration,
     date: new Date().toISOString().slice(0, 10),
+    estimateMs: active.estimateMs ?? null,
   }
   saveSessions([session, ...loadSessions()])
   saveActive(null)
@@ -74,7 +77,7 @@ export function commitSession(active: ActiveSession): TimeSession | null {
 }
 
 /** Start a new session, committing any existing one first. */
-export function startSession(taskId: string | null, taskTitle: string, projectName: string): ActiveSession {
+export function startSession(taskId: string | null, taskTitle: string, projectName: string, estimateMs?: number | null): ActiveSession {
   const existing = loadActive()
   if (existing) commitSession(existing)
 
@@ -84,6 +87,7 @@ export function startSession(taskId: string | null, taskTitle: string, projectNa
     pauses: [],
     isPaused: false,
     pausedAt: null,
+    estimateMs: estimateMs ?? null,
   }
   saveActive(session)
   return session

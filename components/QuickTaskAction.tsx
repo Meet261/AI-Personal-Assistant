@@ -30,15 +30,31 @@ const FILTERS = [
   { key: 'deferred',    label: 'Blocked'     },
 ]
 
+const ESTIMATES = [
+  { label: '15m', ms: 15 * 60_000 },
+  { label: '30m', ms: 30 * 60_000 },
+  { label: '1h',  ms: 60 * 60_000 },
+  { label: '2h',  ms: 120 * 60_000 },
+  { label: '4h',  ms: 240 * 60_000 },
+]
+
+function msToLabel(ms: number) {
+  const h = ms / 3600000
+  if (h >= 1) return `${h % 1 === 0 ? h : h.toFixed(1)}h`
+  return `${Math.round(ms / 60000)}m`
+}
+
 export default function QuickTaskAction() {
-  const [mode, setMode]           = useState<'start' | 'finish' | null>(null)
-  const [tasks, setTasks]         = useState<Task[]>([])
-  const [query, setQuery]         = useState('')
-  const [filter, setFilter]       = useState('all')
-  const [selectedId, setSelected] = useState<string>('')
-  const [saving, setSaving]       = useState(false)
-  const [done, setDone]           = useState(false)
-  const [activeSession, setActive] = useState(() => loadActive())
+  const [mode, setMode]             = useState<'start' | 'finish' | null>(null)
+  const [tasks, setTasks]           = useState<Task[]>([])
+  const [query, setQuery]           = useState('')
+  const [filter, setFilter]         = useState('all')
+  const [selectedId, setSelected]   = useState<string>('')
+  const [saving, setSaving]         = useState(false)
+  const [done, setDone]             = useState(false)
+  const [activeSession, setActive]  = useState(() => loadActive())
+  const [estimateMs, setEstimateMs] = useState<number | null>(null)
+  const [finishResult, setFinishResult] = useState<{ duration: number; estimate: number | null } | null>(null)
   const searchRef = useRef<HTMLInputElement>(null)
 
   // Load tasks (excluding done unless searching)
@@ -69,7 +85,7 @@ export default function QuickTaskAction() {
           if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
           e.preventDefault()
           setMode('start')
-          setQuery(''); setFilter('all'); setSelected(''); setDone(false)
+          setQuery(''); setFilter('all'); setSelected(''); setDone(false); setEstimateMs(null); setFinishResult(null)
           return
         }
         if (e.key.toLowerCase() === 'f') {
@@ -77,13 +93,12 @@ export default function QuickTaskAction() {
           if (mode !== null) { setMode(null); return }
 
           const current = loadActive()
-          // If a task is running AND we know its id, finish it immediately — no picker needed
+          // Always open the overlay in finish mode first so the result banner can show
+          setMode('finish')
+          setQuery(''); setFilter('in_progress'); setSelected(''); setDone(false); setFinishResult(null)
+          // If a task is already running, finish it immediately (result shown in the overlay)
           if (current?.taskId) {
-            finishImmediate(current.taskId, current)
-          } else {
-            // No task tracked — open picker to choose what to finish
-            setMode('finish')
-            setQuery(''); setFilter('in_progress'); setSelected(''); setDone(false)
+            setTimeout(() => finishImmediate(current.taskId!, current), 100)
           }
           return
         }
@@ -130,9 +145,9 @@ export default function QuickTaskAction() {
     if (!task || saving) return
     setSaving(true)
 
-    // Start timer (commits previous session if any)
+    // Start timer (commits previous session if any), passing estimate
     const projectName = task.project?.name ?? ''
-    startSession(task.id, task.title, projectName)
+    startSession(task.id, task.title, projectName, estimateMs)
     dispatchTimerUpdate()
     setActive(loadActive())
 
@@ -153,9 +168,15 @@ export default function QuickTaskAction() {
 
     // Stop timer — always clear active session; commitSession logs it only if ≥5s
     if (current) {
+      const { netElapsed } = await import('@/lib/timer')
+      const actualMs = netElapsed(current, Date.now())
       commitSession(current)
       saveActive(null)          // ensure cleared even if session was too short to log
       dispatchTimerUpdate()
+      // Show actual vs estimate result
+      if (actualMs >= 5000 || current.estimateMs) {
+        setFinishResult({ duration: actualMs, estimate: current.estimateMs ?? null })
+      }
       setActive(null)
     }
 
@@ -168,7 +189,8 @@ export default function QuickTaskAction() {
 
     setSaving(false)
     setDone(true)
-    setTimeout(() => setMode(null), 700)
+    // If there's a result to show, keep overlay open for 3s; otherwise close fast
+    setTimeout(() => setMode(null), finishResult || current?.estimateMs ? 3000 : 700)
   }
 
   async function confirmFinish() {
@@ -233,7 +255,42 @@ export default function QuickTaskAction() {
             </div>
           )}
 
-          {/* Search */}
+          {/* Estimate picker (start mode only) */}
+          {isStart && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+              <Clock size={12} color="var(--muted)" />
+              <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'Lato, sans-serif', fontWeight: 600 }}>Estimate:</span>
+              {ESTIMATES.map(e => (
+                <button key={e.label} type="button" onClick={() => setEstimateMs(estimateMs === e.ms ? null : e.ms)} style={{ padding: '3px 10px', borderRadius: 99, fontSize: 11, fontWeight: 700, fontFamily: 'Raleway, sans-serif', cursor: 'pointer', border: `1.5px solid ${estimateMs === e.ms ? accentColor : 'var(--border)'}`, background: estimateMs === e.ms ? `${accentColor}18` : 'transparent', color: estimateMs === e.ms ? accentColor : 'var(--muted)', transition: 'all .12s' }}>
+                  {e.label}
+                </button>
+              ))}
+              {estimateMs && <span style={{ fontSize: 10, color: 'var(--muted)', marginLeft: 2 }}>← click to clear</span>}
+            </div>
+          )}
+
+          {/* Actual vs estimate result (finish done state) */}
+          {!isStart && done && finishResult && (
+            <div style={{ padding: '10px 14px', borderRadius: 10, background: '#22c55e10', border: '1px solid #22c55e30', marginBottom: 10 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: '#16a34a', fontFamily: 'Raleway, sans-serif', marginBottom: 4 }}>✓ Session complete</div>
+              <div style={{ display: 'flex', gap: 16, fontSize: 12, fontFamily: 'Lato, sans-serif', color: 'var(--muted)' }}>
+                <span>Actual: <strong style={{ color: 'var(--text)' }}>{msToLabel(finishResult.duration)}</strong></span>
+                {finishResult.estimate && (
+                  <>
+                    <span>Estimate: <strong style={{ color: 'var(--text)' }}>{msToLabel(finishResult.estimate)}</strong></span>
+                    <span style={{ color: finishResult.duration <= finishResult.estimate ? '#16a34a' : '#f97316', fontWeight: 700 }}>
+                      {finishResult.duration <= finishResult.estimate
+                        ? `✓ ${msToLabel(finishResult.estimate - finishResult.duration)} under`
+                        : `↑ ${msToLabel(finishResult.duration - finishResult.estimate)} over`}
+                    </span>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Search — hide in finish done state */}
+          {!(done && !isStart) && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--faint)' }}>
             <Search size={13} color="var(--muted)" />
             <input
@@ -257,6 +314,7 @@ export default function QuickTaskAction() {
               }}
             />
           </div>
+          )}
 
           {/* Status filters */}
           <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
