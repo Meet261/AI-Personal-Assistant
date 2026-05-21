@@ -1,13 +1,36 @@
 // ─── Email Agent — IMAP read + triage + SMTP send via Gmail ──────────────
-// Uses imapflow for reading, nodemailer (already installed) for sending.
-// All email content processed locally by Ollama — never sent to cloud.
+// Uses imapflow for reading, nodemailer for sending.
+// Inbox cached in Supabase for 5 min; individual emails cached for 30 min.
+// Summarization/triage via DeepSeek V3 (~$0.0003/call) instead of Ollama.
 
 import nodemailer from 'nodemailer'
-import { callOllama } from '../shared/models'
+import { callDeepSeekV3 } from '../shared/models'
+import { createClient } from '@supabase/supabase-js'
 
 const GMAIL_USER   = process.env.GMAIL_USER!
 const GMAIL_PASS   = process.env.GMAIL_APP_PASSWORD!
-const NOTIFY_EMAIL = process.env.BRIEFING_NOTIFY_EMAIL || GMAIL_USER
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_KEY!
+)
+
+// ── Cache helpers ─────────────────────────────────────────────────────────
+
+async function cacheGet<T>(key: string): Promise<T | null> {
+  const { data } = await supabase
+    .from('email_cache')
+    .select('data')
+    .eq('id', key)
+    .gt('expires_at', new Date().toISOString())
+    .single()
+  return data ? (data.data as T) : null
+}
+
+async function cacheSet(key: string, value: unknown, ttlSeconds: number) {
+  const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString()
+  await supabase.from('email_cache').upsert({ id: key, data: value, cached_at: new Date().toISOString(), expires_at: expiresAt })
+}
 
 // ── SMTP transporter (send) ───────────────────────────────────────────────
 function getTransporter() {
@@ -26,17 +49,22 @@ async function withImap<T>(fn: (client: import('imapflow').ImapFlow) => Promise<
     secure: true,
     auth: { user: GMAIL_USER, pass: GMAIL_PASS },
     logger: false,
+    socketTimeout: 15000,
+    connectionTimeout: 10000,
   })
-  try {
-    await client.connect()
-  } catch (err) {
+
+  // ImapFlow emits errors as events — catch them to prevent unhandledRejection crashes
+  client.on('error', () => {})
+
+  await client.connect().catch(err => {
     const msg = err instanceof Error ? err.message : String(err)
-    throw new Error(`Gmail IMAP connection failed (check GMAIL_USER / GMAIL_APP_PASSWORD): ${msg}`)
-  }
+    throw new Error(`Gmail IMAP connection failed: ${msg}`)
+  })
+
   try {
     return await fn(client)
   } finally {
-    await client.logout().catch(() => {})
+    client.close()
   }
 }
 
@@ -51,6 +79,16 @@ function extractText(parsed: { text?: string | boolean | null; html?: string | b
       .slice(0, 3000)
   }
   return ''
+}
+
+// ── AI call — DeepSeek V3 with Ollama fallback ────────────────────────────
+async function callAI(messages: { role: string; content: string }[], system: string): Promise<string> {
+  try {
+    return await callDeepSeekV3(messages, system)
+  } catch {
+    const { callOllama } = await import('../shared/models')
+    return callOllama(messages, system)
+  }
 }
 
 // ── Main executor ─────────────────────────────────────────────────────────
@@ -72,8 +110,13 @@ async function _executeEmailAction(action: string, params: Record<string, unknow
 
     // ── Fetch inbox (unread or recent) ────────────────────────────────────
     case 'fetch_inbox': {
-      const limit     = (params.limit as number) || 10
-      const unreadOnly = params.unread_only !== false // default true
+      const limit      = (params.limit as number) || 10
+      const unreadOnly = params.unread_only !== false
+      const cacheKey   = `inbox:${GMAIL_USER}:${unreadOnly}:${limit}`
+      const ttl        = unreadOnly ? 300 : 300 // 5 min cache
+
+      const cached = await cacheGet<unknown[]>(cacheKey)
+      if (cached) return { ok: true, message: `${cached.length} ${unreadOnly ? 'unread' : 'recent'} emails (cached)`, data: cached }
 
       return withImap(async client => {
         await client.mailboxOpen('INBOX')
@@ -82,8 +125,22 @@ async function _executeEmailAction(action: string, params: Record<string, unknow
           uid: number; from: string; subject: string; date: string; snippet: string; unread: boolean
         }[] = []
 
-        const searchCriteria = unreadOnly ? { seen: false } : '1:*'
-        for await (const msg of client.fetch(searchCriteria, { source: true, flags: true })) {
+        // For recent: fetch last N UIDs in reverse order (newest first)
+        let searchCriteria: unknown
+        if (unreadOnly) {
+          searchCriteria = { seen: false }
+        } else {
+          const status = await client.status('INBOX', { messages: true })
+          const total = status.messages ?? 0
+          const from = Math.max(1, total - limit + 1)
+          searchCriteria = `${from}:${total}`
+        }
+        const msgs = []
+        for await (const msg of client.fetch(searchCriteria as Parameters<typeof client.fetch>[0], { source: true, flags: true })) {
+          msgs.push(msg)
+        }
+        msgs.reverse() // newest first
+        for (const msg of msgs) {
           if (emails.length >= limit) break
           try {
             if (!msg.source) continue
@@ -99,11 +156,8 @@ async function _executeEmailAction(action: string, params: Record<string, unknow
           } catch { /* skip malformed */ }
         }
 
-        return {
-          ok: true,
-          message: `${emails.length} ${unreadOnly ? 'unread' : 'recent'} emails`,
-          data: emails,
-        }
+        await cacheSet(cacheKey, emails, ttl)
+        return { ok: true, message: `${emails.length} ${unreadOnly ? 'unread' : 'recent'} emails`, data: emails }
       })
     }
 
@@ -112,6 +166,10 @@ async function _executeEmailAction(action: string, params: Record<string, unknow
       const uid = params.uid as number
       if (!uid) return { ok: false, message: 'uid required' }
 
+      const cacheKey = `email:${GMAIL_USER}:${uid}`
+      const cached = await cacheGet<unknown>(cacheKey)
+      if (cached) return { ok: true, message: 'Email (cached)', data: cached }
+
       return withImap(async client => {
         await client.mailboxOpen('INBOX')
         const { simpleParser } = await import('mailparser')
@@ -119,20 +177,17 @@ async function _executeEmailAction(action: string, params: Record<string, unknow
         for await (const msg of client.fetch({ uid: String(uid) }, { source: true, flags: true })) {
           if (!msg.source) continue
           const parsed = await simpleParser(msg.source)
-          // Mark as read
           await client.messageFlagsAdd({ uid: String(uid) }, ['\\Seen'])
-          return {
-            ok: true,
-            message: `Email: ${parsed.subject}`,
-            data: {
-              uid,
-              from: parsed.from?.text ?? 'Unknown',
-              to: Array.isArray(parsed.to) ? parsed.to.map(a => a.text).join(', ') : (parsed.to?.text ?? ''),
-              subject: parsed.subject ?? '(no subject)',
-              date: parsed.date?.toISOString() ?? '',
-              body: extractText(parsed),
-            },
+          const emailData = {
+            uid,
+            from: parsed.from?.text ?? 'Unknown',
+            to: Array.isArray(parsed.to) ? parsed.to.map((a: { text: string }) => a.text).join(', ') : ((parsed.to as { text?: string } | null)?.text ?? ''),
+            subject: parsed.subject ?? '(no subject)',
+            date: parsed.date?.toISOString() ?? '',
+            body: extractText(parsed),
           }
+          await cacheSet(cacheKey, emailData, 1800) // 30 min
+          return { ok: true, message: `Email: ${parsed.subject}`, data: emailData }
         }
         return { ok: false, message: `Email UID ${uid} not found` }
       })
@@ -140,7 +195,11 @@ async function _executeEmailAction(action: string, params: Record<string, unknow
 
     // ── Triage inbox — categorize + prioritize unread emails ──────────────
     case 'triage_inbox': {
-      const limit = (params.limit as number) || 15
+      const limit    = (params.limit as number) || 15
+      const cacheKey = `triage:${GMAIL_USER}:${limit}`
+
+      const cached = await cacheGet<unknown[]>(cacheKey)
+      if (cached) return { ok: true, message: `Triaged ${cached.length} emails (cached)`, data: cached }
 
       return withImap(async client => {
         await client.mailboxOpen('INBOX')
@@ -167,31 +226,17 @@ async function _executeEmailAction(action: string, params: Record<string, unknow
           `[${i + 1}] UID:${e.uid} From: ${e.from}\nSubject: ${e.subject}\nPreview: ${e.snippet}`
         ).join('\n\n')
 
-        const triagePrompt = `Triage these ${rawEmails.length} emails. For each:
-- Priority: urgent / important / low / can-ignore
-- Category: action-required / reply-needed / fyi / newsletter / automated
-- One sentence summary
-
-Emails:
-${emailList}
-
-Respond as JSON array:
-[{"uid":<uid>,"from":"...","subject":"...","priority":"...","category":"...","summary":"..."}]`
-
-        const raw = await callOllama(
-          [{ role: 'user', content: triagePrompt }],
-          'You are an email assistant. Triage emails concisely. Respond only with valid JSON array.'
+        const raw = await callAI(
+          [{ role: 'user', content: `Triage these ${rawEmails.length} emails:\n\n${emailList}\n\nRespond as JSON array:\n[{"uid":<uid>,"from":"...","subject":"...","priority":"urgent|important|low|can-ignore","category":"action-required|reply-needed|fyi|newsletter|automated","summary":"..."}]` }],
+          'You are an email triage assistant. Respond only with a valid JSON array, no other text.'
         )
         const jsonMatch = raw.match(/\[[\s\S]*\]/)
         const triage = jsonMatch ? JSON.parse(jsonMatch[0]) : rawEmails.map(e => ({
           uid: e.uid, from: e.from, subject: e.subject, priority: 'unknown', category: 'unknown', summary: e.snippet.slice(0, 80)
         }))
 
-        return {
-          ok: true,
-          message: `Triaged ${triage.length} emails`,
-          data: triage,
-        }
+        await cacheSet(cacheKey, triage, 300) // 5 min
+        return { ok: true, message: `Triaged ${triage.length} emails`, data: triage }
       })
     }
 
@@ -200,16 +245,22 @@ Respond as JSON array:
       const uid = params.uid as number
       if (!uid) return { ok: false, message: 'uid required' }
 
+      const summaryCacheKey = `summary:${GMAIL_USER}:${uid}`
+      const cachedSummary = await cacheGet<{ summary: string; from: string; subject: string }>(summaryCacheKey)
+      if (cachedSummary) return { ok: true, message: `Summary of: ${cachedSummary.subject} (cached)`, data: cachedSummary }
+
       const readResult = await executeEmailAction('read_email', { uid })
       if (!readResult.ok) return readResult
       const email = readResult.data as { from: string; subject: string; body: string }
 
-      const summary = await callOllama(
+      const summary = await callAI(
         [{ role: 'user', content: `Summarize this email in 2-3 sentences and list any action items:\n\nFrom: ${email.from}\nSubject: ${email.subject}\n\n${email.body}` }],
         'You are an email summarizer. Be concise and action-focused.'
       )
 
-      return { ok: true, message: `Summary of: ${email.subject}`, data: { summary, from: email.from, subject: email.subject } }
+      const result = { summary, from: email.from, subject: email.subject }
+      await cacheSet(summaryCacheKey, result, 3600) // 1 hour
+      return { ok: true, message: `Summary of: ${email.subject}`, data: result }
     }
 
     // ── Draft a reply ─────────────────────────────────────────────────────
@@ -222,7 +273,7 @@ Respond as JSON array:
       if (!readResult.ok) return readResult
       const email = readResult.data as { from: string; subject: string; body: string }
 
-      const draft = await callOllama(
+      const draft = await callAI(
         [{ role: 'user', content: `Draft a reply to this email. Instruction: ${instruction}\n\nOriginal email:\nFrom: ${email.from}\nSubject: ${email.subject}\n\n${email.body}` }],
         `You are drafting an email reply for ${GMAIL_USER}. Be professional and concise. Start directly with the reply content, no preamble.`
       )
@@ -244,9 +295,7 @@ Respond as JSON array:
       const transporter = getTransporter()
       await transporter.sendMail({
         from: `"Personal Assistant" <${GMAIL_USER}>`,
-        to,
-        subject,
-        text: body,
+        to, subject, text: body,
       })
 
       return { ok: true, message: `Email sent to ${to}: "${subject}"` }
@@ -284,7 +333,6 @@ Respond as JSON array:
         const { simpleParser } = await import('mailparser')
         const results: { uid: number; from: string; subject: string; date: string; snippet: string }[] = []
 
-        // Gmail supports IMAP search
         for await (const msg of client.fetch({ text: query }, { source: true })) {
           if (results.length >= limit) break
           try {
@@ -306,13 +354,15 @@ Respond as JSON array:
 
     // ── Get unread count ──────────────────────────────────────────────────
     case 'get_unread_count': {
+      const cacheKey = `unread_count:${GMAIL_USER}`
+      const cached = await cacheGet<{ unread: number; total: number }>(cacheKey)
+      if (cached) return { ok: true, message: `${cached.unread} unread (cached)`, data: cached }
+
       return withImap(async client => {
         const status = await client.status('INBOX', { unseen: true, messages: true })
-        return {
-          ok: true,
-          message: `${status.unseen ?? 0} unread of ${status.messages ?? 0} total`,
-          data: { unread: status.unseen ?? 0, total: status.messages ?? 0 },
-        }
+        const result = { unread: status.unseen ?? 0, total: status.messages ?? 0 }
+        await cacheSet(cacheKey, result, 300) // 5 min
+        return { ok: true, message: `${result.unread} unread of ${result.total} total`, data: result }
       })
     }
 
