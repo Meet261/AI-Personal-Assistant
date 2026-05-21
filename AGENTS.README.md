@@ -328,7 +328,7 @@ Everything else?                            →  Ollama deepseek-r1:7b
 - [x] Knowledge executor wired into orchestrator route
 - [x] ChromaDB added to `dev:all` script — starts automatically
 - [x] `CHROMA_URL` added to `.env.local`
-- [ ] **Run once:** `POST /api/knowledge { "action": "embed_all_papers" }` to index existing papers
+- [x] **Run once:** `POST /api/knowledge { "action": "embed_all_papers" }` to index existing papers
 
 ### Phase 4 — Memory Agent + Writing ✅ (Done)
 - [x] `agents/specialist/memory.ts` — recall, save, forget, get_summary, extract_from_conversation, debug_code, read_file, list_files
@@ -394,6 +394,17 @@ app/api/
     habit/                — habit tracking API
 
 supabase/migrations/
-  001_ecosystem.sql       — habits, scheduler_alerts, token_usage, intent_log
-  002_health_meetings.sql — health_logs, meetings (Phase 2)
+  001_ecosystem.sql             — habits, scheduler_alerts, token_usage, intent_log
+  002_health_meetings.sql       — health_logs, meetings (Phase 2)
+  003_digest_jobs.sql           — async digest job queue + agent_intent_log extensions
+  004_agent_sessions.sql        — chat session persistence per agent
+  005_fts_index.sql             — full-text search index on research_papers
+  006_tool_event_log.sql        — per-tool-call event log for routing trace
+  007_trade_tags.sql            — tags column on trade records
+  008_episodes.sql              — agent episode log (multi-turn context)
+  009_citation_graph.sql        — citation edges between research papers
+  010_paper_arguments.sql       — structured argument extraction fields on papers
+  011_trading_weekly_reviews.sql — weekly trading review snapshots
+  012_email_cache.sql           — Supabase-backed cache for email inbox/triage/summaries
+  013_project_digest_prompt.sql — per-project digest prompt + project_id on digest_jobs
 ```

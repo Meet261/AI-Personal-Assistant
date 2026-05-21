@@ -8,7 +8,7 @@ const supabase = createClient(
 )
 
 function logActivity(type: string, entity_type: string, entity_title: string, meta?: Record<string, unknown>, entity_id?: string) {
-  supabase.from('activity_log').insert({ type, entity_type, entity_id, entity_title, meta, source: 'agent' }).then(() => {})
+  supabase.from('activity_log').insert({ type, entity_type, entity_id, entity_title, meta, source: 'agent' }).then(() => {}).catch(console.error)
 }
 
 async function resolveProject(name: string): Promise<string | null> {

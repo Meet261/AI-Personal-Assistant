@@ -48,6 +48,9 @@ const KNOWN_S2_IDENTIFIERS = {
   'nguyen2018ctdne':      'DOI:10.1145/3184558.3191526',
   'velickovic2018gat':    'arXiv:1710.10903',
   'hamilton2017graphsage':'arXiv:1706.02216',
+  'perozzi2014deepwalk':  'arXiv:1403.6652',
+  'kingma2014adam':       'arXiv:1412.6980',
+  'tang2015line':         'arXiv:1503.03578',
 }
 
 async function sleep(ms) { return new Promise(r => setTimeout(r, ms)) }

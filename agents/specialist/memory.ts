@@ -40,7 +40,7 @@ function listProjectFiles(dir: string, ext: string[] = ['.ts', '.tsx', '.py', '.
 
 // ── Main executor ─────────────────────────────────────────────────────────
 export async function executeMemoryAction(action: string, params: Record<string, unknown>) {
-
+  try {
   switch (action) {
 
     // ── Recall — query memories across one or all agents ─────────────────
@@ -229,5 +229,10 @@ Provide:
 
     default:
       return { ok: false, message: `Unknown memory action: ${action}` }
+  }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    console.error(`[memory] ${action} error:`, msg)
+    return { ok: false, message: `Memory error: ${msg}` }
   }
 }
