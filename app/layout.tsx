@@ -2,6 +2,7 @@ import type { Metadata } from 'next'
 import './globals.css'
 import Sidebar from '@/components/Sidebar'
 import CmdKProvider from '@/components/CmdKProvider'
+import QuickAddTask from '@/components/QuickAddTask'
 
 export const metadata: Metadata = {
   title: 'Personal OS',
@@ -17,6 +18,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <main className="flex-1 overflow-y-auto">
             {children}
           </main>
+          <QuickAddTask />
         </CmdKProvider>
       </body>
     </html>
