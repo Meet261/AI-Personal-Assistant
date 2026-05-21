@@ -542,7 +542,7 @@ async function runEveningNudge(date) {
 
     <div style="margin-top:20px;padding:16px;background:#f0fdf4;border-radius:8px;border-left:4px solid #22c55e">
       <p style="margin:0;color:#166534;font-size:13px;font-weight:600">
-        Tip: press <strong>⌘+Shift+N</strong> anywhere in the app to add a task in under 3 seconds.
+        Tip: press <strong>Ctrl+N</strong> anywhere in the app to add a task in under 3 seconds.
       </p>
     </div>
   </div>

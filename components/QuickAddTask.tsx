@@ -31,7 +31,7 @@ export default function QuickAddTask() {
   // Global ⌘+Shift+N shortcut
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key.toLowerCase() === 'n') {
+      if (e.ctrlKey && !e.metaKey && !e.shiftKey && e.key.toLowerCase() === 'n') {
         e.preventDefault()
         setOpen(o => !o)
       }
@@ -163,7 +163,9 @@ export default function QuickAddTask() {
             <kbd style={{ padding: '1px 5px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 10, background: 'var(--faint)' }}>↵</kbd>
             {' '}save &nbsp;·&nbsp;
             <kbd style={{ padding: '1px 5px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 10, background: 'var(--faint)' }}>Esc</kbd>
-            {' '}cancel
+            {' '}cancel &nbsp;·&nbsp;
+            <kbd style={{ padding: '1px 5px', borderRadius: 4, border: '1px solid var(--border)', fontSize: 10, background: 'var(--faint)' }}>^N</kbd>
+            {' '}toggle
           </span>
           <button
             onClick={save}
