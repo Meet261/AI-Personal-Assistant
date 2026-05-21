@@ -1,6 +1,6 @@
 // ─── Research specialist — papers, highlights, projects + writing mode ────
 import { createClient } from '@supabase/supabase-js'
-import { callOllama } from '../shared/models'
+import { callDeepSeekR1 as callOllama } from '../shared/models'
 import { executeKnowledgeAction } from './knowledge'
 
 const supabase = createClient(

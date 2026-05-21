@@ -1,6 +1,6 @@
 // ─── Personal Assistant specialist — tasks, projects & meetings ───────────
 import { createClient } from '@supabase/supabase-js'
-import { callOllama } from '../shared/models'
+import { callDeepSeekChat as callOllama } from '../shared/models'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,

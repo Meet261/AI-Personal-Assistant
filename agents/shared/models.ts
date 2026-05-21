@@ -85,36 +85,60 @@ export async function callOllama(
   }
 }
 
-// Call DeepSeek V3 via API — used for structured tool-call dispatch
-// Much more reliable than R1 for JSON output; costs ~$0.28/M input tokens
-export async function callDeepSeekV3(
+async function deepSeekRequest(
+  model: 'deepseek-chat' | 'deepseek-reasoner',
   messages: { role: string; content: string }[],
   systemPrompt: string,
+  options: { temperature?: number; max_tokens?: number; timeout?: number } = {}
 ): Promise<string> {
   const apiKey = process.env.DEEPSEEK_API_KEY
   if (!apiKey) throw new Error('DEEPSEEK_API_KEY not set')
 
   const res = await fetch('https://api.deepseek.com/chat/completions', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${apiKey}`,
-    },
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
     body: JSON.stringify({
-      model: 'deepseek-chat', // V3
+      model,
       messages: [{ role: 'system', content: systemPrompt }, ...messages],
-      temperature: 0.0,       // zero temp for deterministic tool JSON
-      max_tokens: 512,        // tool calls are short — cap spend
+      temperature: options.temperature ?? 0.0,
+      max_tokens: options.max_tokens ?? 1024,
     }),
-    signal: AbortSignal.timeout(30_000), // 30s — V3 is fast
+    signal: AbortSignal.timeout(options.timeout ?? 30_000),
   })
 
   if (!res.ok) {
     const err = await res.text()
-    throw new Error(`DeepSeek V3 error: ${res.status} ${err}`)
+    throw new Error(`DeepSeek ${model} error: ${res.status} ${err}`)
   }
   const data = await res.json()
+  // R1 returns reasoning_content separately; get the final answer content
   return (data.choices?.[0]?.message?.content as string ?? '').trim()
+}
+
+// V3 — structured JSON tool dispatch (zero temp, short output)
+export async function callDeepSeekV3(
+  messages: { role: string; content: string }[],
+  systemPrompt: string,
+): Promise<string> {
+  return deepSeekRequest('deepseek-chat', messages, systemPrompt, { temperature: 0.0, max_tokens: 512 })
+}
+
+// V3 — conversational agent responses (slightly warmer, longer output)
+// Drop-in replacement for callOllama — $0.27/M in · $1.10/M out
+export async function callDeepSeekChat(
+  messages: { role: string; content: string }[],
+  systemPrompt: string,
+): Promise<string> {
+  return deepSeekRequest('deepseek-chat', messages, systemPrompt, { temperature: 0.3, max_tokens: 1500, timeout: 30_000 })
+}
+
+// R1 — deep reasoning for research analysis, contradiction detection, complex synthesis
+// 2× the cost of V3 but significantly better at multi-step academic reasoning
+export async function callDeepSeekR1(
+  messages: { role: string; content: string }[],
+  systemPrompt: string,
+): Promise<string> {
+  return deepSeekRequest('deepseek-reasoner', messages, systemPrompt, { temperature: 0.6, max_tokens: 2000, timeout: 60_000 })
 }
 
 // Call Claude Haiku (API)

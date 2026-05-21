@@ -3,7 +3,7 @@
 // Returns which agents to call + synthesized response
 
 import type { AgentId, Intent, AgentContext, AgentMessage } from '../shared/types'
-import { callOllama } from '../shared/models'
+import { callDeepSeekChat as callOllama } from '../shared/models'
 import { contextToString } from '../shared/context'
 
 // ── Intent classification prompt ──────────────────────────────────────────
@@ -47,8 +47,7 @@ export async function classifyIntent(
   try {
     const raw = await callOllama(
       [{ role: 'user', content: prompt }],
-      CLASSIFIER_SYSTEM,
-      'deepseek-r1:7b'
+      CLASSIFIER_SYSTEM
     )
     const jsonMatch = raw.match(/\{[\s\S]*\}/)
     if (!jsonMatch) throw new Error('No JSON in response')

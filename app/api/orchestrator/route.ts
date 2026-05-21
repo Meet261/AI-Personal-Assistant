@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
 import { classifyIntent, buildAgentSystemPrompt, synthesize } from '@/agents/orchestrator'
 import { buildAgentContext } from '@/agents/shared/context'
-import { callOllama, callDeepSeekV3, modelForAgent } from '@/agents/shared/models'
+import { callDeepSeekChat, callDeepSeekV3, modelForAgent } from '@/agents/shared/models'
 import type { AgentId } from '@/agents/shared/types'
 
 // Specialist agent executors — imported inline to keep one API route
@@ -296,7 +296,7 @@ async function runAgent(
   let raw: string
   if (pre) {
     // Data already fetched — pure reasoning, use local R1
-    raw = await callOllama(augmentedMessages, activeSystemPrompt, agentModel)
+    raw = await callDeepSeekChat(augmentedMessages, activeSystemPrompt)
   } else if (hasDeepSeekKey) {
     // No pre-flight — may need to emit tool calls
     // Step A: V3 generates the tool block (fast, reliable JSON)
@@ -328,7 +328,7 @@ If no tool is needed, answer directly in plain English.`
             { role: 'user', content: `${userMessage}\n\n${resultContext}` },
           ]
           const finalSystemPrompt = `You are a helpful ${agentId} assistant. A tool was already called and returned the data above. Answer the user's question naturally using this data. Do NOT emit tool blocks.`
-          raw = await callOllama(finalMessages, finalSystemPrompt, agentModel)
+          raw = await callDeepSeekChat(finalMessages, finalSystemPrompt)
         } else {
           raw = v3Raw.replace(/```tool[\s\S]*?```/g, '').trim()
         }
@@ -341,7 +341,7 @@ If no tool is needed, answer directly in plain English.`
     }
   } else {
     // No DeepSeek key — fall back to R1 for everything
-    raw = await callOllama(augmentedMessages, activeSystemPrompt, agentModel)
+    raw = await callDeepSeekChat(augmentedMessages, activeSystemPrompt)
   }
 
   // 3. Parse any remaining tool blocks from R1 (write operations not caught above)

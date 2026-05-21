@@ -5,7 +5,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { readFileSync, existsSync, readdirSync } from 'fs'
 import { join, extname } from 'path'
-import { callOllama } from '../shared/models'
+import { callDeepSeekChat as callOllama } from '../shared/models'
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,

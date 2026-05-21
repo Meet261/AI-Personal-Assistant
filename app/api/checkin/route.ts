@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@supabase/supabase-js'
-import { ollamaChat } from '@/lib/ollama'
+import { callDeepSeekChat } from '@/agents/shared/models'
 import { format, addDays } from 'date-fns'
 import type { CheckinAnswer } from '@/lib/types'
 
@@ -48,8 +48,10 @@ Respond in this exact JSON format:
   ]
 }`
 
-  const raw = await ollamaChat(prompt, 'deepseek-r1:7b',
-    'You are a concise productivity assistant. Always respond with valid JSON only.')
+  const raw = await callDeepSeekChat(
+    [{ role: 'user', content: prompt }],
+    'You are a concise productivity assistant. Always respond with valid JSON only.'
+  )
 
   let summary = ''
   let tasksToSchedule: Array<{ title: string; priority: string; effort: string; reason: string }> = []
