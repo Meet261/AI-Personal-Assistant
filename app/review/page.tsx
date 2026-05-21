@@ -7,6 +7,7 @@ import { loadSessions } from '@/lib/timer'
 interface Task { id: string; title: string; status: string; priority: string; completed_at: string | null; created_at?: string; project?: { name: string; color: string } | null }
 interface JournalEntry { date: string; energy_level: number | null; completed_today: string; blocked_or_pushed: string; tomorrow_focus?: string }
 interface HabitSummary { total_habits: number; completion_rate: number; best_streak: number; habits: { name: string; streak: number; done_today: boolean; completed_count: number }[] }
+interface HabitGridRow { id: string; name: string; color: string; days: { date: string; done: boolean }[] }
 interface TradeSummary { total_pnl: number; today_pnl: number; wins: number; losses: number; win_rate: number }
 interface Paper { id: string; title: string; dissertation_relevance: number | null; reading_status: string; updated_at: string }
 
@@ -48,6 +49,7 @@ export default function WeeklyReviewPage() {
   const [tasks, setTasks] = useState<Task[]>([])
   const [journal, setJournal] = useState<JournalEntry[]>([])
   const [habits, setHabits] = useState<HabitSummary | null>(null)
+  const [habitGrid, setHabitGrid] = useState<HabitGridRow[]>([])
   const [trading, setTrading] = useState<TradeSummary | null>(null)
   const [papers, setPapers] = useState<Paper[]>([])
   const [timerSessions, setTimerSessions] = useState<ReturnType<typeof loadSessions>>([])
@@ -61,18 +63,20 @@ export default function WeeklyReviewPage() {
   useEffect(() => {
     async function load() {
       setLoading(true)
-      const [tasksRes, journalRes, habitsRes, tradingRes, papersRes] = await Promise.allSettled([
+      const [tasksRes, journalRes, habitsRes, habitGridRes, tradingRes, papersRes] = await Promise.allSettled([
         fetch('/api/tasks').then(r => r.json()),
         fetch('/api/journal').then(r => r.json()),
         fetch('/api/agents/habit?action=get_weekly_summary').then(r => r.json()),
+        fetch('/api/agents/habit?action=get_grid').then(r => r.json()),
         fetch('/api/trading/summary').then(r => r.json()),
         fetch('/api/research/papers').then(r => r.json()),
       ])
-      if (tasksRes.status === 'fulfilled')  setTasks(tasksRes.value ?? [])
-      if (journalRes.status === 'fulfilled') setJournal(journalRes.value ?? [])
-      if (habitsRes.status === 'fulfilled') setHabits(habitsRes.value?.data ?? null)
-      if (tradingRes.status === 'fulfilled') setTrading(tradingRes.value ?? null)
-      if (papersRes.status === 'fulfilled') setPapers(papersRes.value ?? [])
+      if (tasksRes.status === 'fulfilled')     setTasks(tasksRes.value ?? [])
+      if (journalRes.status === 'fulfilled')   setJournal(journalRes.value ?? [])
+      if (habitsRes.status === 'fulfilled')    setHabits(habitsRes.value?.data ?? null)
+      if (habitGridRes.status === 'fulfilled') setHabitGrid(habitGridRes.value?.data?.grid ?? [])
+      if (tradingRes.status === 'fulfilled')   setTrading(tradingRes.value ?? null)
+      if (papersRes.status === 'fulfilled')    setPapers(papersRes.value ?? [])
       setTimerSessions(loadSessions())
       setLoading(false)
     }
@@ -237,6 +241,60 @@ export default function WeeklyReviewPage() {
                 {h.streak > 0 && <span style={{ fontSize: 11, fontWeight: 700, color: '#a855f7' }}>{h.streak}🔥</span>}
               </div>
             ))}
+
+            {/* Habit ↔ Task correlation */}
+            {(() => {
+              if (habitGrid.length === 0 || completedTasks.length === 0) return null
+
+              // Build a map: date → { habitsCompleted, tasksCompleted }
+              const dayMap: Record<string, { habitsDone: number; tasksDone: number }> = {}
+              for (const row of habitGrid) {
+                for (const day of row.days) {
+                  if (!dayMap[day.date]) dayMap[day.date] = { habitsDone: 0, tasksDone: 0 }
+                  if (day.done) dayMap[day.date].habitsDone++
+                }
+              }
+              for (const t of tasks) {
+                if (t.completed_at) {
+                  const d = t.completed_at.slice(0, 10)
+                  if (!dayMap[d]) dayMap[d] = { habitsDone: 0, tasksDone: 0 }
+                  dayMap[d].tasksDone++
+                }
+              }
+
+              const days = Object.values(dayMap).filter(d => d.habitsDone > 0 || d.tasksDone > 0)
+              if (days.length < 3) return null
+
+              const withHabits    = days.filter(d => d.habitsDone > 0)
+              const withoutHabits = days.filter(d => d.habitsDone === 0)
+              if (withHabits.length === 0 || withoutHabits.length === 0) return null
+
+              const avgWith    = (withHabits.reduce((s, d) => s + d.tasksDone, 0) / withHabits.length).toFixed(1)
+              const avgWithout = (withoutHabits.reduce((s, d) => s + d.tasksDone, 0) / withoutHabits.length).toFixed(1)
+              const diff = parseFloat(avgWith) - parseFloat(avgWithout)
+
+              return (
+                <div style={{ marginTop: 12, padding: '12px 14px', borderRadius: 10, background: diff > 0 ? '#a855f710' : 'var(--faint)', border: `1px solid ${diff > 0 ? '#a855f730' : 'var(--border)'}` }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: '#a855f7', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Habit ↔ Task Correlation</div>
+                  <div style={{ display: 'flex', gap: 16, fontSize: 13, fontFamily: 'Lato' }}>
+                    <div>
+                      <div style={{ fontWeight: 700, color: '#a855f7', fontSize: 20, fontFamily: 'Raleway' }}>{avgWith}</div>
+                      <div style={{ color: 'var(--muted)', fontSize: 11 }}>tasks/day with habits</div>
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 700, color: 'var(--muted)', fontSize: 20, fontFamily: 'Raleway' }}>{avgWithout}</div>
+                      <div style={{ color: 'var(--muted)', fontSize: 11 }}>tasks/day without habits</div>
+                    </div>
+                    <div style={{ marginLeft: 'auto', textAlign: 'right' }}>
+                      <div style={{ fontWeight: 800, color: diff > 0 ? '#22c55e' : '#f97316', fontSize: 16, fontFamily: 'Raleway' }}>
+                        {diff > 0 ? `+${diff.toFixed(1)}` : diff.toFixed(1)} tasks
+                      </div>
+                      <div style={{ color: 'var(--muted)', fontSize: 11 }}>difference on habit days</div>
+                    </div>
+                  </div>
+                </div>
+              )
+            })()}
           </div>
         )}
       </Section>
