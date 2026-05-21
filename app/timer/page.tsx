@@ -3,53 +3,13 @@ import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { Play, Pause, Square, Timer, BarChart2, Clock, Layers, ChevronRight, Calendar, Zap } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import type { Task, Project } from '@/lib/types'
-import { format, startOfWeek, eachDayOfInterval, endOfWeek, parseISO, isToday } from 'date-fns'
+import { format, startOfWeek, eachDayOfInterval, endOfWeek, isToday } from 'date-fns'
+import {
+  type ActiveSession, type TimeSession,
+  loadSessions, saveSessions, loadActive, saveActive, netElapsed, timerUid as uid,
+} from '@/lib/timer'
 
 const S = { fontFamily: 'Raleway, sans-serif' }
-
-// ── Types ──────────────────────────────────────────────────────────
-interface TimeSession {
-  id: string
-  taskId: string | null
-  taskTitle: string
-  projectName: string
-  start: number   // epoch ms
-  end: number     // epoch ms
-  duration: number // ms
-  date: string    // YYYY-MM-DD
-}
-
-interface ActiveSession {
-  taskId: string | null
-  taskTitle: string
-  projectName: string
-  start: number
-  pauses: { from: number; to: number }[]
-  isPaused: boolean
-  pausedAt: number | null
-}
-
-// ── Storage helpers ────────────────────────────────────────────────
-function loadSessions(): TimeSession[] {
-  if (typeof window === 'undefined') return []
-  try { return JSON.parse(localStorage.getItem('time_sessions') || '[]') } catch { return [] }
-}
-function saveSessions(s: TimeSession[]) {
-  localStorage.setItem('time_sessions', JSON.stringify(s))
-}
-function loadActive(): ActiveSession | null {
-  if (typeof window === 'undefined') return null
-  try {
-    const v = localStorage.getItem('active_session')
-    return v ? JSON.parse(v) : null
-  } catch { return null }
-}
-function saveActive(s: ActiveSession | null) {
-  if (s) localStorage.setItem('active_session', JSON.stringify(s))
-  else localStorage.removeItem('active_session')
-}
-
-function uid() { return Math.random().toString(36).slice(2) }
 
 function msToHMS(ms: number) {
   const s = Math.floor(ms / 1000)
@@ -67,13 +27,6 @@ function msToHHMMSS(ms: number) {
   const m = Math.floor((s % 3600) / 60)
   const sec = s % 60
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
-}
-
-// Net elapsed excluding pauses
-function netElapsed(active: ActiveSession, now: number): number {
-  let paused = active.pauses.reduce((acc, p) => acc + (p.to - p.from), 0)
-  if (active.isPaused && active.pausedAt) paused += now - active.pausedAt
-  return now - active.start - paused
 }
 
 // ── Main component ─────────────────────────────────────────────────
@@ -112,6 +65,18 @@ export default function TimerPage() {
       setActiveState(act)
       setElapsed(netElapsed(act, Date.now()))
     }
+  }, [])
+
+  // React to external timer changes (from quick-action overlays)
+  useEffect(() => {
+    function onTimerUpdate() {
+      setSessions(loadSessions())
+      const act = loadActive()
+      setActiveState(act)
+      setElapsed(act ? netElapsed(act, Date.now()) : 0)
+    }
+    window.addEventListener('timer:update', onTimerUpdate)
+    return () => window.removeEventListener('timer:update', onTimerUpdate)
   }, [])
 
   // Tick

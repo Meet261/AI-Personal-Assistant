@@ -3,6 +3,7 @@ import './globals.css'
 import Sidebar from '@/components/Sidebar'
 import CmdKProvider from '@/components/CmdKProvider'
 import QuickAddTask from '@/components/QuickAddTask'
+import QuickTaskAction from '@/components/QuickTaskAction'
 
 export const metadata: Metadata = {
   title: 'Personal OS',
@@ -19,6 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             {children}
           </main>
           <QuickAddTask />
+          <QuickTaskAction />
         </CmdKProvider>
       </body>
     </html>
