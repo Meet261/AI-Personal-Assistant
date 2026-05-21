@@ -29,7 +29,7 @@ Rules:
 - dissertation_relevance: 1-5 score for relevance to a dissertation on representativeness and data fusion in temporal networks
 - Never return null fields — use empty array [] if truly nothing fits`
 
-export async function digestPaper(paperId: string, paperText: string): Promise<{
+export async function digestPaper(paperId: string, paperText: string, systemPrompt?: string): Promise<{
   ok: boolean
   summary?: string
   message: string
@@ -37,7 +37,7 @@ export async function digestPaper(paperId: string, paperText: string): Promise<{
   try {
     const raw = await callHaiku(
       [{ role: 'user', content: `Please analyze this academic paper:\n\n${paperText.slice(0, 12000)}` }],
-      DIGEST_SYSTEM
+      systemPrompt ?? DIGEST_SYSTEM
     )
 
     const jsonMatch = raw.match(/\{[\s\S]*\}/)
@@ -121,12 +121,15 @@ export async function executeDigesterAction(action: string, params: Record<strin
     case 'digest_paper': {
       const paperId = params.paper_id as string
       const text = params.text as string
+      const systemPrompt = params.system_prompt as string | undefined
       if (!paperId || !text) return { ok: false, message: 'paper_id and text required' }
-      return digestPaper(paperId, text)
+      return digestPaper(paperId, text, systemPrompt)
     }
     case 'get_undigested': {
-      const { data } = await supabase.from('research_papers')
-        .select('id,title,has_pdf').is('summary', null).limit(10)
+      const projectId = params.project_id as string | undefined
+      let q = supabase.from('research_papers').select('id,title,has_pdf').is('summary', null).limit(10)
+      if (projectId) q = q.eq('project_id', projectId)
+      const { data } = await q
       return { ok: true, message: `${data?.length || 0} papers without summaries`, data }
     }
 

@@ -1,32 +1,63 @@
 'use client'
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Microscope, Zap, RefreshCw, CheckCircle2, Clock, Star, X, AlertTriangle } from 'lucide-react'
+import { Microscope, Zap, RefreshCw, CheckCircle2, Clock, Star, X, AlertTriangle, Save, FolderOpen } from 'lucide-react'
 import AgentPageLayout from '@/components/agents/AgentPageLayout'
 
 const COLOR = '#9D174D'
 
 interface Paper { id: string; title: string; authors: string; year: number; summary: string | null; tags: string[]; dissertation_relevance: number | null; notes: string | null }
+interface Project { id: string; name: string; color: string; digest_prompt: string | null }
 interface JobProgress { type: string; processed?: number; total?: number; current?: string; title?: string; reason?: string; job_id?: string; failed?: string[] }
 interface ActiveJob { id: string; status: string; total_papers: number; processed: number; failed: number; current_paper: string | null }
 
 export default function DigesterAgentPage() {
+  // ── Core state ─────────────────────────────────────────────────────────────
+  const [projects, setProjects] = useState<Project[]>([])
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('')
   const [undigested, setUndigested] = useState<Paper[]>([])
   const [digested, setDigested] = useState<Paper[]>([])
   const [loading, setLoading] = useState(true)
   const [digesting, setDigesting] = useState<string | null>(null)
   const [result, setResult] = useState<string | null>(null)
+  const [selectedPaperId, setSelectedPaperId] = useState('')
 
-  // Job progress state
+  // ── Job progress state ─────────────────────────────────────────────────────
   const [activeJob, setActiveJob] = useState<ActiveJob | null>(null)
   const [jobLog, setJobLog] = useState<{ title: string; ok: boolean }[]>([])
   const [jobRunning, setJobRunning] = useState(false)
   const abortRef = useRef<AbortController | null>(null)
 
+  // ── Settings / prompt editor state ────────────────────────────────────────
+  const [settingsProjectId, setSettingsProjectId] = useState<string>('')
+  const [promptDraft, setPromptDraft] = useState<string>('')
+  const [savingPrompt, setSavingPrompt] = useState(false)
+  const [promptSaved, setPromptSaved] = useState(false)
+
+  // ── Load projects once ─────────────────────────────────────────────────────
+  useEffect(() => {
+    fetch('/api/research/projects')
+      .then(r => r.json())
+      .then((data: Project[]) => {
+        setProjects(data ?? [])
+        if (data?.length) setSettingsProjectId(data[0].id)
+      })
+      .catch(() => {})
+  }, [])
+
+  // ── Sync prompt draft when settings project changes ────────────────────────
+  useEffect(() => {
+    const proj = projects.find(p => p.id === settingsProjectId)
+    setPromptDraft(proj?.digest_prompt ?? '')
+    setPromptSaved(false)
+  }, [settingsProjectId, projects])
+
+  // ── Load papers (re-runs when project filter changes) ─────────────────────
   const load = useCallback(async () => {
     setLoading(true)
+    const qs = selectedProjectId ? `?project_id=${selectedProjectId}` : ''
     const [all, statusRes] = await Promise.allSettled([
-      fetch('/api/research/papers').then(r => r.json()),
-      fetch('/api/agents/paper-digester').then(r => r.json()),
+      fetch(`/api/research/papers${qs}`).then(r => r.json()),
+      fetch(`/api/agents/paper-digester${qs}`).then(r => r.json()),
     ])
     if (all.status === 'fulfilled') {
       const papers = all.value as Paper[]
@@ -40,10 +71,11 @@ export default function DigesterAgentPage() {
       }
     }
     setLoading(false)
-  }, [])
+  }, [selectedProjectId])
 
   useEffect(() => { load() }, [load])
 
+  // ── Actions ────────────────────────────────────────────────────────────────
   async function digestOne(paperId: string) {
     setDigesting(paperId)
     const res = await fetch('/api/agents/paper-digester', {
@@ -62,11 +94,14 @@ export default function DigesterAgentPage() {
     setResult(null)
     abortRef.current = new AbortController()
 
+    const params: Record<string, unknown> = { force }
+    if (selectedProjectId) params.project_id = selectedProjectId
+
     try {
       const res = await fetch('/api/agents/paper-digester', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'digest_all', params: { force } }),
+        body: JSON.stringify({ action: 'digest_all', params }),
         signal: abortRef.current.signal,
       })
 
@@ -77,7 +112,6 @@ export default function DigesterAgentPage() {
         return
       }
 
-      // Handle SSE stream for progress
       if (res.headers.get('content-type')?.includes('text/event-stream')) {
         const reader = res.body!.getReader()
         const decoder = new TextDecoder()
@@ -110,7 +144,6 @@ export default function DigesterAgentPage() {
           }
         }
       } else {
-        // Non-streaming fallback (already done etc.)
         const data = await res.json()
         setResult(data.message)
       }
@@ -134,6 +167,21 @@ export default function DigesterAgentPage() {
     load()
   }
 
+  async function savePrompt() {
+    if (!settingsProjectId) return
+    setSavingPrompt(true)
+    await fetch('/api/agents/paper-digester', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'save_project_prompt', params: { project_id: settingsProjectId, prompt: promptDraft || null } }),
+    })
+    // Update local projects cache so the sync effect picks up new value
+    setProjects(ps => ps.map(p => p.id === settingsProjectId ? { ...p, digest_prompt: promptDraft || null } : p))
+    setSavingPrompt(false)
+    setPromptSaved(true)
+    setTimeout(() => setPromptSaved(false), 2500)
+  }
+
+  // ── Helpers ────────────────────────────────────────────────────────────────
   function parseHaikuTags(tags: string[]) {
     const keywords = tags.filter(t => !t.startsWith('category:') && !t.startsWith('theme:'))
     const category = tags.find(t => t.startsWith('category:'))?.replace('category:', '') ?? null
@@ -142,9 +190,32 @@ export default function DigesterAgentPage() {
 
   const estimatedCost = (undigested.length * 0.004).toFixed(2)
   const jobPct = activeJob ? Math.round((activeJob.processed / activeJob.total_papers) * 100) : 0
+  const selectedProject = projects.find(p => p.id === selectedProjectId)
 
+  // ── Project filter bar (shared across tabs) ────────────────────────────────
+  const projectFilter = projects.length > 0 ? (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, padding: '10px 14px', background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 12 }}>
+      <FolderOpen size={14} color={COLOR} />
+      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', fontFamily: 'Raleway', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Project</span>
+      <select
+        value={selectedProjectId}
+        onChange={e => { setSelectedProjectId(e.target.value); setSelectedPaperId('') }}
+        style={{ flex: 1, padding: '6px 10px', borderRadius: 8, border: '1px solid var(--border)', background: 'var(--faint)', color: 'var(--text)', fontFamily: 'Lato', fontSize: 13, outline: 'none' }}
+      >
+        <option value="">All projects</option>
+        {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+      </select>
+      {selectedProject?.digest_prompt && (
+        <span style={{ fontSize: 10, padding: '3px 8px', borderRadius: 5, background: `${COLOR}15`, color: COLOR, fontWeight: 700, whiteSpace: 'nowrap' }}>custom prompt</span>
+      )}
+    </div>
+  ) : null
+
+  // ── Dashboard tab ──────────────────────────────────────────────────────────
   const dashboard = (
     <div style={{ maxWidth: 860 }}>
+      {projectFilter}
+
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 22 }}>
         {[
@@ -180,8 +251,6 @@ export default function DigesterAgentPage() {
               <X size={11} /> Cancel
             </button>
           </div>
-
-          {/* Progress bar */}
           <div style={{ marginBottom: 12 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
               <span style={{ fontSize: 12, color: 'var(--muted)', fontFamily: 'Lato' }}>
@@ -193,15 +262,11 @@ export default function DigesterAgentPage() {
               <div style={{ height: '100%', width: `${jobPct}%`, background: COLOR, borderRadius: 4, transition: 'width .5s ease' }} />
             </div>
           </div>
-
-          {/* Paper log */}
           {jobLog.length > 0 && (
             <div style={{ maxHeight: 160, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
               {[...jobLog].reverse().map((item, i) => (
                 <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, fontFamily: 'Lato' }}>
-                  {item.ok
-                    ? <CheckCircle2 size={11} color="#22c55e" />
-                    : <AlertTriangle size={11} color="#f97316" />}
+                  {item.ok ? <CheckCircle2 size={11} color="#22c55e" /> : <AlertTriangle size={11} color="#f97316" />}
                   <span style={{ color: item.ok ? 'var(--text)' : '#f97316' }}>{item.title?.slice(0, 70)}</span>
                 </div>
               ))}
@@ -215,7 +280,7 @@ export default function DigesterAgentPage() {
         <div style={{ background: 'var(--panel)', borderRadius: 14, border: '1px solid var(--border)', marginBottom: 20, overflow: 'hidden' }}>
           <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-              Pending Digest ({undigested.length})
+              Pending Digest ({undigested.length}){selectedProject ? ` — ${selectedProject.name}` : ''}
             </span>
             <div style={{ display: 'flex', gap: 8 }}>
               <button onClick={() => digestAll(false)} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 9, border: `1px solid ${COLOR}30`, background: `${COLOR}08`, color: COLOR, fontFamily: 'Raleway', fontWeight: 700, fontSize: 11, cursor: 'pointer' }}>
@@ -249,7 +314,7 @@ export default function DigesterAgentPage() {
       <div style={{ background: 'var(--panel)', borderRadius: 14, border: '1px solid var(--border)', overflow: 'hidden' }}>
         <div style={{ padding: '14px 18px', borderBottom: '1px solid var(--border)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
           <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', textTransform: 'uppercase', letterSpacing: '0.07em' }}>
-            Digested Library ({digested.length})
+            Digested Library ({digested.length}){selectedProject ? ` — ${selectedProject.name}` : ''}
           </span>
           <button onClick={load} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: 4 }}>
             <RefreshCw size={13} />
@@ -284,12 +349,13 @@ export default function DigesterAgentPage() {
     </div>
   )
 
-  // ── Actions tab: quick digest controls ────────────────────────────────────
-  const [selectedPaperId, setSelectedPaperId] = useState('')
+  // ── Actions tab ────────────────────────────────────────────────────────────
   const allPapers = [...digested, ...undigested]
 
   const actions = (
     <div style={{ maxWidth: 560 }}>
+      {projectFilter}
+
       <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 14, padding: 24, marginBottom: 16 }}>
         <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 800, color: 'var(--text)', fontFamily: 'Raleway' }}>Digest a Paper</h3>
         <div style={{ marginBottom: 12 }}>
@@ -323,7 +389,13 @@ export default function DigesterAgentPage() {
       </div>
 
       <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
-        <h3 style={{ margin: '0 0 16px', fontSize: 14, fontWeight: 800, color: 'var(--text)', fontFamily: 'Raleway' }}>Batch Actions</h3>
+        <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 800, color: 'var(--text)', fontFamily: 'Raleway' }}>Batch Actions</h3>
+        {selectedProject && (
+          <p style={{ margin: '0 0 14px', fontSize: 12, color: 'var(--muted)', fontFamily: 'Lato' }}>
+            Scoped to: <strong>{selectedProject.name}</strong>
+            {selectedProject.digest_prompt ? ' · custom prompt active' : ' · using default prompt'}
+          </p>
+        )}
         <div style={{ display: 'flex', gap: 10 }}>
           <button onClick={() => digestAll(false)} disabled={jobRunning || undigested.length === 0}
             style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 18px', borderRadius: 10, border: `1px solid ${COLOR}30`, background: `${COLOR}08`, color: COLOR, fontFamily: 'Raleway', fontWeight: 700, fontSize: 13, cursor: jobRunning || undigested.length === 0 ? 'default' : 'pointer', opacity: undigested.length === 0 ? 0.5 : 1 }}>
@@ -333,6 +405,71 @@ export default function DigesterAgentPage() {
             style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 18px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--faint)', color: 'var(--muted)', fontFamily: 'Raleway', fontWeight: 700, fontSize: 13, cursor: jobRunning ? 'default' : 'pointer' }}>
             <RefreshCw size={14} /> Re-digest All
           </button>
+        </div>
+        {allPapers.length === 0 && <p style={{ marginTop: 12, fontSize: 12, color: 'var(--muted)', fontFamily: 'Lato' }}>No papers in this project yet.</p>}
+      </div>
+      <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+    </div>
+  )
+
+  // ── Settings tab ───────────────────────────────────────────────────────────
+  const settingsProject = projects.find(p => p.id === settingsProjectId)
+
+  const settings = (
+    <div style={{ maxWidth: 600 }}>
+      <div style={{ background: 'var(--panel)', border: '1px solid var(--border)', borderRadius: 14, padding: 24 }}>
+        <h3 style={{ margin: '0 0 4px', fontSize: 14, fontWeight: 800, color: 'var(--text)', fontFamily: 'Raleway' }}>Per-Project Digest Prompt</h3>
+        <p style={{ margin: '0 0 18px', fontSize: 12, color: 'var(--muted)', fontFamily: 'Lato', lineHeight: 1.6 }}>
+          Customise the system prompt Haiku uses when digesting papers in a specific project. Leave blank to use the global default (temporal networks / dissertation focus).
+        </p>
+
+        {/* Project picker */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', display: 'block', marginBottom: 6, fontFamily: 'Raleway', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Project</label>
+          <select
+            value={settingsProjectId}
+            onChange={e => setSettingsProjectId(e.target.value)}
+            style={{ width: '100%', padding: '9px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--faint)', color: 'var(--text)', fontFamily: 'Lato', fontSize: 13, outline: 'none' }}
+          >
+            {projects.length === 0 && <option value="">No projects found</option>}
+            {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+          </select>
+        </div>
+
+        {/* Prompt textarea */}
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ fontSize: 12, fontWeight: 700, color: 'var(--muted)', display: 'block', marginBottom: 6, fontFamily: 'Raleway', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Digest Prompt {settingsProject?.digest_prompt ? <span style={{ color: COLOR, marginLeft: 6 }}>● custom</span> : <span style={{ color: '#6b7280', marginLeft: 6 }}>○ default</span>}
+          </label>
+          <textarea
+            value={promptDraft}
+            onChange={e => { setPromptDraft(e.target.value); setPromptSaved(false) }}
+            placeholder={`Leave blank to use the default prompt.\n\nExample:\nYou are an expert academic paper summarizer specializing in machine learning for climate science.\n\nGiven a paper, extract ALL of the following. Respond ONLY in this exact JSON format:\n{\n  "summary": "...",\n  "key_findings": [...],\n  ...\n}`}
+            rows={14}
+            style={{ width: '100%', padding: '10px 12px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--faint)', color: 'var(--text)', fontFamily: 'monospace', fontSize: 12, outline: 'none', resize: 'vertical', lineHeight: 1.6, boxSizing: 'border-box' }}
+          />
+          <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--muted)', fontFamily: 'Lato' }}>
+            The prompt must instruct Haiku to respond with JSON containing: summary, key_findings, methodology, relevance_note, dissertation_relevance (1–5), tags, category, themes.
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            onClick={savePrompt}
+            disabled={savingPrompt || !settingsProjectId}
+            style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 20px', borderRadius: 10, border: 'none', background: settingsProjectId && !savingPrompt ? COLOR : 'var(--faint)', color: settingsProjectId && !savingPrompt ? '#fff' : 'var(--muted)', fontFamily: 'Raleway', fontWeight: 700, fontSize: 13, cursor: settingsProjectId && !savingPrompt ? 'pointer' : 'default', transition: 'all .15s' }}
+          >
+            {savingPrompt ? <><RefreshCw size={14} style={{ animation: 'spin .8s linear infinite' }} /> Saving…</> : <><Save size={14} /> Save Prompt</>}
+          </button>
+          {!promptDraft && settingsProjectId && (
+            <button
+              onClick={() => { setPromptDraft(''); savePrompt() }}
+              style={{ padding: '10px 16px', borderRadius: 10, border: '1px solid var(--border)', background: 'var(--faint)', color: 'var(--muted)', fontFamily: 'Raleway', fontWeight: 700, fontSize: 12, cursor: 'pointer' }}
+            >
+              Reset to default
+            </button>
+          )}
+          {promptSaved && <span style={{ fontSize: 12, color: '#22c55e', fontFamily: 'Lato' }}>✓ Saved</span>}
         </div>
       </div>
       <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
@@ -345,14 +482,17 @@ export default function DigesterAgentPage() {
       agentName="Paper Digester"
       agentColor={COLOR}
       agentIcon={<Microscope size={20} />}
-      description="Claude Haiku deep analysis · ~$0.004/paper · live progress tracking"
+      description="Claude Haiku deep analysis · ~$0.004/paper · project-scoped · live progress"
       tabs={['dashboard', 'actions', 'chat', 'settings']}
       starters={['How many papers are undigested?', 'Which papers have the highest dissertation relevance?', 'What categories do my papers fall into?']}
       dashboard={dashboard}
       actions={actions}
-      settings={<div style={{ padding: 20, color: 'var(--muted)', fontFamily: 'Lato', fontSize: 13 }}>Paper Digester settings — configure digest prompt and cost limits here (coming soon).</div>}
+      settings={settings}
       commandCenter={
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {selectedProject && (
+            <div style={{ fontSize: 10, fontWeight: 700, color: COLOR, fontFamily: 'Raleway', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 2 }}>{selectedProject.name}</div>
+          )}
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'Lato' }}>Digested</span>
             <span style={{ fontSize: 12, fontWeight: 800, color: '#22c55e' }}>{digested.length}</span>

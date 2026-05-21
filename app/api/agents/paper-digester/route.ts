@@ -32,10 +32,26 @@ function buildTextFromMetadata(paper: Record<string, string | number | null | un
   ].filter(Boolean).join('\n\n')
 }
 
-// GET /api/agents/paper-digester — list undigested papers + active job status
-export async function GET() {
+async function getProjectPrompt(projectId: string | null): Promise<string | undefined> {
+  if (!projectId) return undefined
+  const { data } = await supabase
+    .from('research_projects')
+    .select('digest_prompt')
+    .eq('id', projectId)
+    .single()
+  return data?.digest_prompt ?? undefined
+}
+
+// GET /api/agents/paper-digester?project_id=xxx — list undigested papers + active job status
+export async function GET(req: NextRequest) {
+  const { searchParams } = new URL(req.url)
+  const projectId = searchParams.get('project_id')
+
+  let q = supabase.from('research_papers').select('id,title,has_pdf,pdf_url').is('summary', null).limit(20)
+  if (projectId) q = q.eq('project_id', projectId)
+
   const [undigested, activeJob] = await Promise.all([
-    supabase.from('research_papers').select('id,title,has_pdf,pdf_url').is('summary', null).limit(20),
+    q,
     supabase.from('digest_jobs').select('*').in('status', ['pending', 'running']).order('created_at', { ascending: false }).limit(1),
   ])
   return NextResponse.json({
@@ -46,7 +62,6 @@ export async function GET() {
   })
 }
 
-// GET /api/agents/paper-digester/progress?job_id=xxx — SSE stream of job progress
 // POST /api/agents/paper-digester
 export async function POST(req: NextRequest) {
   if (!process.env.ANTHROPIC_API_KEY) {
@@ -60,15 +75,19 @@ export async function POST(req: NextRequest) {
     const paperId = params.paper_id as string
     if (!paperId) return NextResponse.json({ ok: false, message: 'paper_id required' }, { status: 400 })
 
+    const { data: paper } = await supabase
+      .from('research_papers')
+      .select('title,authors,year,journal,abstract,notes,project_id')
+      .eq('id', paperId)
+      .single()
+    if (!paper) return NextResponse.json({ ok: false, message: 'Paper not found' })
+
     let text = await extractTextFromStoredPdf(paperId)
-    if (!text || text.trim().length < 200) {
-      const { data: paper } = await supabase.from('research_papers').select('title,authors,year,journal,abstract,notes').eq('id', paperId).single()
-      if (!paper) return NextResponse.json({ ok: false, message: 'Paper not found' })
-      text = buildTextFromMetadata(paper)
-    }
+    if (!text || text.trim().length < 200) text = buildTextFromMetadata(paper)
     if (!text || text.trim().length < 50) return NextResponse.json({ ok: false, message: 'Not enough content to digest' })
 
-    const result = await digestPaper(paperId, text)
+    const systemPrompt = await getProjectPrompt(paper.project_id ?? null)
+    const result = await digestPaper(paperId, text, systemPrompt)
     if (result.ok) await executeKnowledgeAction('embed_paper', { paper_id: paperId }).catch(() => {})
     return NextResponse.json(result)
   }
@@ -76,18 +95,29 @@ export async function POST(req: NextRequest) {
   // ── digest_all — async with SSE progress stream ───────────────────────────
   if (action === 'digest_all') {
     const force = params.force === true
+    const projectId = params.project_id as string | undefined
 
-    // Check if a job is already running
-    const { data: existing } = await supabase.from('digest_jobs').select('id,status').in('status', ['pending','running']).limit(1)
+    // Check if a job is already running for this scope
+    let jobCheck = supabase.from('digest_jobs').select('id,status').in('status', ['pending','running'])
+    if (projectId) jobCheck = jobCheck.eq('project_id', projectId)
+    const { data: existing } = await jobCheck.limit(1)
     if (existing?.length) {
       return NextResponse.json({ ok: false, message: 'A digest job is already running', job_id: existing[0].id })
     }
 
     // Fetch papers to digest
-    let q = supabase.from('research_papers').select('id,title,authors,year,journal,abstract,notes').limit(100)
+    let q = supabase.from('research_papers').select('id,title,authors,year,journal,abstract,notes,project_id').limit(100)
     if (!force) q = q.is('summary', null)
+    if (projectId) q = q.eq('project_id', projectId)
     const { data: papers } = await q
     if (!papers?.length) return NextResponse.json({ ok: true, message: 'All papers already digested' })
+
+    // Pre-fetch all unique project prompts needed for this batch
+    const projectIds = [...new Set(papers.map(p => p.project_id).filter(Boolean))]
+    const promptMap: Record<string, string | undefined> = {}
+    await Promise.all(projectIds.map(async pid => {
+      promptMap[pid] = await getProjectPrompt(pid)
+    }))
 
     // Create job record
     const { data: job } = await supabase.from('digest_jobs').insert({
@@ -96,6 +126,7 @@ export async function POST(req: NextRequest) {
       processed: 0,
       failed: 0,
       force,
+      project_id: projectId ?? null,
       started_at: new Date().toISOString(),
     }).select().single()
 
@@ -115,7 +146,6 @@ export async function POST(req: NextRequest) {
         send({ type: 'start', job_id: job.id, total: papers.length })
 
         for (const paper of papers) {
-          // Update job with current paper
           await supabase.from('digest_jobs').update({ current_paper: paper.title, processed }).eq('id', job.id)
           send({ type: 'progress', processed, total: papers.length, current: paper.title })
 
@@ -124,7 +154,8 @@ export async function POST(req: NextRequest) {
             if (!text || text.trim().length < 200) text = buildTextFromMetadata(paper)
             if (!text || text.trim().length < 50) { failed.push(paper.title); continue }
 
-            const result = await digestPaper(paper.id, text)
+            const systemPrompt = paper.project_id ? promptMap[paper.project_id] : undefined
+            const result = await digestPaper(paper.id, text, systemPrompt)
             if (result.ok) {
               processed++
               await executeKnowledgeAction('embed_paper', { paper_id: paper.id }).catch(() => {})
@@ -139,7 +170,6 @@ export async function POST(req: NextRequest) {
           }
         }
 
-        // Mark job complete
         await supabase.from('digest_jobs').update({
           status: failed.length === papers.length ? 'failed' : 'done',
           processed,
@@ -176,6 +206,19 @@ export async function POST(req: NextRequest) {
     if (!jobId) return NextResponse.json({ ok: false, message: 'job_id required' })
     await supabase.from('digest_jobs').update({ status: 'failed', error: 'Cancelled by user', completed_at: new Date().toISOString() }).eq('id', jobId)
     return NextResponse.json({ ok: true, message: 'Job cancelled' })
+  }
+
+  // ── save_project_prompt — update a project's digest prompt ────────────────
+  if (action === 'save_project_prompt') {
+    const projectId = params.project_id as string
+    const prompt = params.prompt as string | null
+    if (!projectId) return NextResponse.json({ ok: false, message: 'project_id required' })
+    const { error } = await supabase
+      .from('research_projects')
+      .update({ digest_prompt: prompt ?? null, updated_at: new Date().toISOString() })
+      .eq('id', projectId)
+    if (error) return NextResponse.json({ ok: false, message: error.message }, { status: 500 })
+    return NextResponse.json({ ok: true, message: 'Prompt saved' })
   }
 
   return NextResponse.json({ ok: false, message: 'Unknown action' }, { status: 400 })
