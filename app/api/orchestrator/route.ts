@@ -30,7 +30,7 @@ const AGENT_TOOL_ALLOWLIST: Record<string, string[]> = {
   assistant:      ['add_task','add_project','add_project_with_tasks','bulk_add_tasks','list_tasks','list_projects','update_task_status','update_task','delete_task','delete_project','create_meeting','get_meetings','get_past_meetings','capture_meeting_notes','extract_action_items','prep_meeting_brief'],
   trading:        ['get_risk_state','get_recent_trades','get_today_trades','get_performance_summary','get_recent_predictions'],
   journal:        ['get_today_entry','save_entry','get_energy_pattern','get_recent_entries','log_health'],
-  scheduler:      ['get_week_view','get_overdue','get_alerts','dismiss_alert','dismiss_all_alerts','schedule_task','create_event'],
+  scheduler:      ['get_week_view','get_overdue','get_alerts','dismiss_alert','dismiss_all_alerts','schedule_task','batch_schedule','get_all_tasks','get_projects','create_event'],
   'habit-tracker':['get_habits','create_habit','update_habit','delete_habit','get_grid','toggle_today','log_habit','get_streaks','get_weekly_summary','send_weekly_digest'],
   knowledge:      ['search_knowledge','embed_paper','embed_all_papers','status','reindex'],
   memory:         ['save','recall','forget','get_summary','list','debug_code','extract_from_conversation'],
@@ -108,11 +108,22 @@ async function preflight(
   }
 
   else if (agentId === 'scheduler') {
-    const [alerts, overdue] = await Promise.all([
+    const [alerts, overdue, allTasks, projects] = await Promise.all([
       executeSchedulerAction('get_alerts', {}),
       executeSchedulerAction('get_overdue', {}),
+      executeSchedulerAction('get_all_tasks', {}),
+      executeSchedulerAction('get_projects', {}),
     ])
-    agentData = { data: { alerts: alerts.data, overdue: overdue.data }, summary: `${alerts.message}, ${overdue.message}` }
+    agentData = {
+      data: {
+        alerts: alerts.data,
+        overdue: overdue.data,
+        // Inject ALL real tasks so the model cannot hallucinate task names
+        all_tasks: allTasks.data,
+        projects: projects.data,
+      },
+      summary: `${alerts.message} · ${overdue.message} · ${allTasks.message} · ${projects.message}`,
+    }
   }
 
   else if (agentId === 'habit-tracker') {
@@ -276,15 +287,28 @@ async function runAgent(
 
   let augmentedMessages = messages
   let activeSystemPrompt = systemPrompt
+  // Agents that need pre-loaded data but also need to emit write tool blocks
+  const WRITE_CAPABLE_AGENTS = new Set(['scheduler', 'assistant', 'habit-tracker'])
+
   if (pre) {
     toolResults.push(pre.data)
-    // Data already fetched — simplified prompt so model doesn't try to call tools again
-    activeSystemPrompt = `You are a helpful ${agentId} assistant. The data below has already been fetched — do NOT emit tool blocks. Answer the user's question directly and concisely using only this data.`
-    const dataContext = `[Live data from ${agentId}]\n${JSON.stringify(pre.data, null, 2)}\n\nSummary: ${pre.summary}`
-    augmentedMessages = [
-      ...messages.slice(0, -1),
-      { role: 'user', content: `${userMessage}\n\n${dataContext}` },
-    ]
+    const dataContext = `[Live data — already fetched, do NOT call read tools again]\n${JSON.stringify(pre.data, null, 2)}\n\nSummary: ${pre.summary}`
+
+    if (WRITE_CAPABLE_AGENTS.has(agentId)) {
+      // Keep the full system prompt (with tool rules) but inject data into the user turn
+      // so the model can still emit write tool blocks (batch_schedule, add_task, etc.)
+      augmentedMessages = [
+        ...messages.slice(0, -1),
+        { role: 'user', content: `${userMessage}\n\n${dataContext}` },
+      ]
+    } else {
+      // Read-only agents: no tool blocks needed, override with simple prompt
+      activeSystemPrompt = `You are a helpful ${agentId} assistant. The data below has already been fetched — do NOT emit tool blocks. Answer the user's question directly and concisely using only this data.`
+      augmentedMessages = [
+        ...messages.slice(0, -1),
+        { role: 'user', content: `${userMessage}\n\n${dataContext}` },
+      ]
+    }
   }
 
   // 2. Choose model based on task:
@@ -294,19 +318,27 @@ async function runAgent(
   const agentModel = "deepseek-chat"
 
   let raw: string
-  if (pre) {
-    // Data already fetched — pure reasoning, use local R1
+  if (pre && !WRITE_CAPABLE_AGENTS.has(agentId)) {
+    // Read-only pre-flight — pure reasoning, no tool calls needed
     raw = await callDeepSeekChat(augmentedMessages, activeSystemPrompt)
   } else if (hasDeepSeekKey) {
-    // No pre-flight — may need to emit tool calls
-    // Step A: V3 generates the tool block (fast, reliable JSON)
-    const toolSystemPrompt = `${activeSystemPrompt}
+    // Detect confirmation on write-capable agents (user says "yes/go ahead/schedule it")
+    const isConfirmation = WRITE_CAPABLE_AGENTS.has(agentId) &&
+      /^(yes|yeah|yep|go ahead|schedule it|do it|confirm|ok|sure|execute|apply|write it|save it|lock it in|sounds good|looks good)/i.test(userMessage.trim())
 
-IMPORTANT: If you need data, emit exactly ONE tool block in this format and nothing else:
+    // Step A: V3 generates the tool block (fast, reliable JSON)
+    const toolInstruction = isConfirmation
+      ? `CRITICAL: The user has confirmed. You MUST now emit the appropriate write tool block to execute the action. Output ONLY the tool block — no text before or after:
+\`\`\`tool
+{"action":"<write_action>","params":{...}}
+\`\`\``
+      : `IMPORTANT: If you need data or want to take an action, emit exactly ONE tool block:
 \`\`\`tool
 {"action":"<action>","params":{}}
 \`\`\`
 If no tool is needed, answer directly in plain English.`
+
+    const toolSystemPrompt = `${activeSystemPrompt}\n\n${toolInstruction}`
     const v3Raw = await callDeepSeekV3(augmentedMessages, toolSystemPrompt)
 
     // Check if V3 emitted a tool block

@@ -38,7 +38,8 @@ async function runNightlyCron(): Promise<NextResponse> {
     // 1. Overdue tasks → alert
     const overdue = await executeSchedulerAction('get_overdue', {})
     if (overdue.ok && Array.isArray(overdue.data) && overdue.data.length > 0) {
-      const titles = overdue.data.map((t: { title: string; deadline: string }) =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const titles = (overdue.data as any[]).map((t: { title: string; deadline: string }) =>
         `"${t.title}" (due ${t.deadline})`
       ).join(', ')
       await supabase.from('scheduler_alerts').insert({

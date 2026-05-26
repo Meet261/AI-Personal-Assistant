@@ -10,6 +10,97 @@ export async function executeSchedulerAction(action: string, params: Record<stri
   const today = new Date().toISOString().slice(0, 10)
   try {
   switch (action) {
+
+    // ── Cross-agent: read same task data as personal assistant ────────────
+    case 'get_all_tasks': {
+      const { data: tasks } = await supabase.from('tasks')
+        .select('id,title,description,priority,effort,status,deadline,scheduled_for,project:projects(id,name,color)')
+        .neq('status', 'done')
+        .order('priority')
+      return {
+        ok: true,
+        message: `${tasks?.length ?? 0} pending tasks`,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        data: tasks?.map((t: any) => ({
+          id: t.id,
+          title: t.title,
+          priority: t.priority,
+          effort: t.effort,
+          deadline: t.deadline,
+          scheduled_for: t.scheduled_for,
+          project: t.project?.name ?? 'No project',
+        }))
+      }
+    }
+
+    case 'get_projects': {
+      const { data: projects } = await supabase.from('projects')
+        .select('id,name,color')
+        .eq('status', 'active')
+        .order('name')
+      return { ok: true, message: `${projects?.length ?? 0} active projects`, data: projects }
+    }
+
+    // ── Batch-schedule: apply a full week plan at once ────────────────────
+    // params.assignments = [{ task_id, date, time_slot? }]
+    case 'batch_schedule': {
+      const assignments = params.assignments as { task_id: string; date: string; time_slot?: string }[]
+      if (!Array.isArray(assignments) || assignments.length === 0)
+        return { ok: false, message: 'assignments array required' }
+
+      const results: string[] = []
+      const errors: string[] = []
+
+      for (const a of assignments) {
+        const update: Record<string, string> = {
+          scheduled_for: a.date,
+          updated_at: new Date().toISOString(),
+        }
+        // Store time slot in description suffix if provided
+        if (a.time_slot) {
+          const { data: task } = await supabase.from('tasks').select('description').eq('id', a.task_id).single()
+          const base = (task?.description ?? '').replace(/\s*\[🕐[^\]]+\]$/, '')
+          update.description = `${base}${base ? ' ' : ''}[🕐 ${a.time_slot}]`.trim()
+        }
+        const { error } = await supabase.from('tasks').update(update).eq('id', a.task_id)
+        if (error) errors.push(`${a.task_id}: ${error.message}`)
+        else results.push(a.task_id)
+      }
+
+      return {
+        ok: errors.length === 0,
+        message: `Scheduled ${results.length}/${assignments.length} tasks${errors.length ? ` (${errors.length} failed)` : ''}`,
+        data: { scheduled: results.length, failed: errors },
+      }
+    }
+
+    // ── Schedule by ID (reliable) or fuzzy title (fallback) ───────────────
+    case 'schedule_task': {
+      const timeSlot = params.time_slot as string | undefined
+      let taskId = params.task_id as string | undefined
+
+      if (!taskId && params.task_title) {
+        const { data: found } = await supabase.from('tasks')
+          .select('id,title').ilike('title', `%${params.task_title}%`).limit(1)
+        if (!found?.length) return { ok: false, message: `No task matching "${params.task_title}"` }
+        taskId = found[0].id
+      }
+      if (!taskId) return { ok: false, message: 'task_id or task_title required' }
+
+      const update: Record<string, string> = {
+        scheduled_for: params.date as string,
+        updated_at: new Date().toISOString(),
+      }
+      if (timeSlot) {
+        const { data: task } = await supabase.from('tasks').select('title,description').eq('id', taskId).single()
+        const base = (task?.description ?? '').replace(/\s*\[🕐[^\]]+\]$/, '')
+        update.description = `${base}${base ? ' ' : ''}[🕐 ${timeSlot}]`.trim()
+        return supabase.from('tasks').update(update).eq('id', taskId)
+          .then(() => ({ ok: true, message: `Scheduled "${task?.title}" for ${params.date} at ${timeSlot}` }))
+      }
+      await supabase.from('tasks').update(update).eq('id', taskId)
+      return { ok: true, message: `Scheduled task for ${params.date}` }
+    }
     case 'get_week_view': {
       const weekEnd = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
       const { data: tasks } = await supabase.from('tasks')
@@ -42,20 +133,16 @@ export async function executeSchedulerAction(action: string, params: Record<stri
       }).filter(Boolean) ?? []
       return { ok: true, message: `${alerts.length} alerts`, data: alerts }
     }
-    case 'schedule_task': {
-      const { data: found } = await supabase.from('tasks').select('id,title').ilike('title', `%${params.task_title}%`).limit(1)
-      if (!found?.length) return { ok: false, message: `No task matching "${params.task_title}"` }
-      await supabase.from('tasks').update({ scheduled_for: params.date, updated_at: new Date().toISOString() }).eq('id', found[0].id)
-      return { ok: true, message: `Scheduled "${found[0].title}" for ${params.date}` }
-    }
     case 'reschedule_overdue': {
       // Move all overdue tasks to today (or specified date)
       const targetDate = (params.date as string) || today
       const { data: overdue } = await supabase.from('tasks')
         .select('id,title').neq('status', 'done').lt('deadline', today).not('deadline', 'is', null)
       if (!overdue?.length) return { ok: true, message: 'No overdue tasks to reschedule' }
-      await supabase.from('tasks').update({ scheduled_for: targetDate, updated_at: new Date().toISOString() }).in('id', overdue.map(t => t.id))
-      return { ok: true, message: `Rescheduled ${overdue.length} overdue tasks to ${targetDate}`, data: overdue.map(t => t.title) }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await supabase.from('tasks').update({ scheduled_for: targetDate, updated_at: new Date().toISOString() }).in('id', overdue.map((t: any) => t.id))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return { ok: true, message: `Rescheduled ${overdue.length} overdue tasks to ${targetDate}`, data: overdue.map((t: any) => t.title) }
     }
     case 'dismiss_alert': {
       const id = params.id as string
