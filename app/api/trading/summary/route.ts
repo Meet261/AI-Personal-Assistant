@@ -1,10 +1,11 @@
 import { NextResponse } from 'next/server'
-import { executeTradingAction } from '@/agents/specialist/trading'
+import { executeTradingAction, type TradeSource } from '@/agents/specialist/trading'
 
-// Single source of truth: all CSV parsing lives in agents/specialist/trading.ts
-export async function GET() {
+export async function GET(req: Request) {
   try {
-    // Check if trading agent is live
+    const { searchParams } = new URL(req.url)
+    const source = (searchParams.get('source') ?? 'both') as TradeSource
+
     let running = false
     try {
       const r = await fetch('http://localhost:8000/health', { signal: AbortSignal.timeout(1000) })
@@ -12,8 +13,8 @@ export async function GET() {
     } catch {}
 
     const [summary, todayResult, riskResult] = await Promise.all([
-      executeTradingAction('get_performance_summary', {}),
-      executeTradingAction('get_today_trades', {}),
+      executeTradingAction('get_performance_summary', { source }),
+      executeTradingAction('get_today_trades', { source }),
       executeTradingAction('get_risk_state', {}),
     ])
 
@@ -25,7 +26,6 @@ export async function GET() {
     const todayData = (todayResult.data as { trades: unknown[]; summary: { count: number; pnl: string; wins: number; losses: number } } | null)
     const risk = riskResult.data as { open_positions?: Record<string, boolean> } | null
 
-    // Only trust open positions when agent is live (stale file otherwise)
     const openPositions = running ? (risk?.open_positions ?? {}) : {}
     const openCount = Object.values(openPositions).filter(Boolean).length
     const symbols = Object.entries(openPositions).filter(([, v]) => v).map(([k]) => k)
