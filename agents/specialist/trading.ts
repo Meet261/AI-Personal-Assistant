@@ -2,7 +2,7 @@
 import { readFileSync, existsSync } from 'fs'
 import { join } from 'path'
 
-const AITRADER_BASE  = join(process.cwd(), '..', 'Trade', 'trading_agent')
+const AITRADER_BASE  = join(process.cwd(), '..', 'Trading Agent', 'trading_agent')
 const ALCHEMIST_BASE = join(process.cwd(), '..', 'Trading Agent', 'alchemist_mt5_trader')
 
 export type TradeSource = 'aitrader' | 'alchemist' | 'both'
