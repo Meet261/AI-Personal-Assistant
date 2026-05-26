@@ -8,6 +8,8 @@ interface Task {
   title: string
   status: string
   priority: string
+  scheduled_for?: string | null
+  deadline?: string | null
   project?: { id: string; name: string; color: string } | null
 }
 
@@ -121,6 +123,21 @@ export default function QuickTaskAction() {
   }, [mode, activeSession])
 
   // ── Filtered task list ─────────────────────────────────────────────────────
+  const today = new Date().toISOString().slice(0, 10)
+  const tomorrow = new Date(Date.now() + 86400000).toISOString().slice(0, 10)
+
+  // Date bucket: 0 = overdue, 1 = today, 2 = tomorrow, 3 = this week, 4 = future, 5 = undated
+  function dateBucket(t: Task): number {
+    const d = t.scheduled_for ?? t.deadline
+    if (!d) return 5
+    if (d < today) return 0   // overdue
+    if (d === today) return 1
+    if (d === tomorrow) return 2
+    const weekOut = new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)
+    if (d <= weekOut) return 3
+    return 4
+  }
+
   const filtered = tasks.filter(t => {
     if (mode === 'start' && t.status === 'done') return false
     if (mode === 'finish' && t.status === 'done') return false
@@ -132,9 +149,13 @@ export default function QuickTaskAction() {
     }
     return true
   }).sort((a, b) => {
-    // In-progress tasks float to top in both modes
+    // In-progress tasks always float to top
     if (a.status === 'in_progress' && b.status !== 'in_progress') return -1
     if (b.status === 'in_progress' && a.status !== 'in_progress') return 1
+    // Then sort by date bucket (today → tomorrow → this week → future → undated, overdue first)
+    const db = dateBucket(a) - dateBucket(b)
+    if (db !== 0) return db
+    // Within same date bucket: sort by priority
     const order = { urgent: 0, high: 1, medium: 2, low: 3 }
     return (order[a.priority as keyof typeof order] ?? 2) - (order[b.priority as keyof typeof order] ?? 2)
   })
@@ -376,6 +397,13 @@ export default function QuickTaskAction() {
                   <div style={{ fontSize: 11, color: 'var(--muted)', fontFamily: 'Lato, sans-serif', marginTop: 2 }}>
                     {task.project?.name && <span style={{ color: task.project.color }}>{task.project.name} · </span>}
                     <span style={{ color: STATUS_COLOR[task.status] ?? '#888' }}>{STATUS_LABEL[task.status] ?? task.status}</span>
+                    {(() => {
+                      const d = task.scheduled_for ?? task.deadline
+                      if (!d) return null
+                      const label = d < today ? `⚠ overdue (${d})` : d === today ? 'Today' : d === tomorrow ? 'Tomorrow' : d
+                      const color = d < today ? '#ef4444' : d === today ? '#3dd6d0' : d === tomorrow ? '#f97316' : 'var(--muted)'
+                      return <span style={{ color, marginLeft: 6, fontWeight: d <= tomorrow ? 700 : 400 }}>· {label}</span>
+                    })()}
                   </div>
                 </div>
 
