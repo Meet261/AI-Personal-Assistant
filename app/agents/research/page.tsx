@@ -2,6 +2,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { BookOpen, Play, Square, ExternalLink, RefreshCw, FileText, Tag, Cpu, Star, CheckCircle2, BookMarked, Clock, X, Plus } from 'lucide-react'
 import AgentPageLayout from '@/components/agents/AgentPageLayout'
+import PaperGraph from '@/components/PaperGraph'
 import { startSession, dispatchTimerUpdate } from '@/lib/timer'
 
 const COLOR = '#7C3AED'
@@ -37,6 +38,7 @@ export default function ResearchAgentPage() {
   const [running, setRunning]       = useState(false)
   const [controlling, setControlling] = useState(false)
   const [papers, setPapers]         = useState<Paper[]>([])
+  const [allPapers, setAllPapers]   = useState<Paper[]>([])
   const [queuePapers, setQueuePapers] = useState<Paper[]>([])
   const [paperCount, setPaperCount] = useState(0)
   const [loading, setLoading]       = useState(true)
@@ -63,6 +65,7 @@ export default function ResearchAgentPage() {
       const data: Paper[] = await fetch('/api/research/papers').then(r => r.json())
       if (Array.isArray(data)) {
         setPapers(data.slice(0, 6))
+        setAllPapers(data)
         setPaperCount(data.length)
       }
     } catch {}
@@ -180,7 +183,8 @@ export default function ResearchAgentPage() {
   const filteredQueue = queuePapers.filter(p => {
     if (queueFilter === 'reading') return p.reading_status === 'reading' || p.reading_status === 'in-progress'
     if (queueFilter === 'unread') return p.reading_status === 'not-started' || p.reading_status === 'unread'
-    return true
+    // Default 'all': only show papers with relevance >= 4, or currently reading, to avoid flooding with references
+    return (p.dissertation_relevance ?? 0) >= 4 || p.reading_status === 'reading' || p.reading_status === 'in-progress'
   })
 
   const readingNow = queuePapers.filter(p => p.reading_status === 'reading' || p.reading_status === 'in-progress')
@@ -359,6 +363,11 @@ export default function ResearchAgentPage() {
                         <span key={t} style={{ padding: '2px 8px', borderRadius: 5, fontSize: 10, fontWeight: 700, background: `${COLOR}10`, color: COLOR }}>{t}</span>
                       ))}
                       <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                        {/* Open in research app reading mode (deep-link) */}
+                        <a href={`/api/research-app?paper=${paper.id}`} target="_blank" rel="noopener noreferrer"
+                          style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '6px 14px', borderRadius: 9, border: `1px solid ${COLOR}40`, background: `${COLOR}08`, color: COLOR, fontFamily: 'Raleway', fontWeight: 700, fontSize: 12, textDecoration: 'none' }}>
+                          <ExternalLink size={11} /> Open Reader
+                        </a>
                         {!isReading && (
                           <button onClick={() => startReading(paper)} disabled={!!isActioning} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 9, border: `1px solid ${COLOR}40`, background: `${COLOR}10`, color: COLOR, fontFamily: 'Raleway', fontWeight: 700, fontSize: 12, cursor: 'pointer', opacity: isActioning ? 0.5 : 1 }}>
                             <Play size={11} fill={COLOR} /> {isActioning ? 'Starting…' : 'Start Reading'}
@@ -443,7 +452,7 @@ export default function ResearchAgentPage() {
       agentColor={COLOR}
       agentIcon={<BookOpen size={20} />}
       description="Paper library, highlights & semantic search"
-      tabs={['dashboard', 'queue', 'chat', 'settings']}
+      tabs={['dashboard', 'queue', 'graph', 'chat', 'settings']}
       starters={[
         'What papers do I have on machine learning?',
         'Summarise my most relevant papers for my dissertation',
@@ -453,6 +462,7 @@ export default function ResearchAgentPage() {
       ]}
       dashboard={dashboard}
       queue={queue}
+      graph={<PaperGraph papers={allPapers} />}
       settings={settings}
       commandCenter={
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

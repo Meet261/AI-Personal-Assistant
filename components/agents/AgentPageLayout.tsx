@@ -1,7 +1,49 @@
 'use client'
 import { useState, useRef, useEffect, useCallback, type ReactNode } from 'react'
-import { Send, X, Loader2, Bot, User, ChevronRight, MessageSquare, LayoutDashboard, Zap, History, Settings, Terminal, Eye, EyeOff, Trash2, Activity, PlusCircle, Clock, ChevronLeft, BookMarked } from 'lucide-react'
+import { Send, X, Loader2, Bot, User, ChevronRight, MessageSquare, LayoutDashboard, Zap, History, Settings, Terminal, Eye, EyeOff, Trash2, Activity, PlusCircle, Clock, ChevronLeft, BookMarked, Mic, MicOff, Volume2, VolumeX, Network } from 'lucide-react'
 import { useAgentChat, type ChatMessage } from './useAgentChat'
+
+function stripForSpeech(text: string): string {
+  return text
+    .replace(/```[\s\S]*?```/g, '') // code blocks
+    .replace(/`[^`]+`/g, '')        // inline code
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/^#{1,3}\s+/gm, '')
+    .replace(/^[-*•]\s+/gm, '')
+    .replace(/\n+/g, '. ')
+    .trim()
+}
+
+function speakText(text: string) {
+  if (typeof window === 'undefined' || !window.speechSynthesis) return
+  window.speechSynthesis.cancel()
+  const clean = stripForSpeech(text)
+  if (!clean) return
+
+  const doSpeak = () => {
+    const utt = new SpeechSynthesisUtterance(clean)
+    utt.rate = 1.1
+    utt.pitch = 1.2
+    const voices = window.speechSynthesis.getVoices()
+    const femaleNames = ['Samantha', 'Karen', 'Ava', 'Allison', 'Victoria', 'Moira', 'Tessa', 'Fiona', 'Zoe', 'Susan']
+    const female = voices.find(v => v.lang.startsWith('en') && femaleNames.some(n => v.name.includes(n)))
+      ?? voices.find(v => v.lang.startsWith('en') && v.localService)
+      ?? voices[0]
+    if (female) utt.voice = female
+    window.speechSynthesis.speak(utt)
+  }
+
+  // Chrome loads voices asynchronously — wait if not ready yet
+  if (window.speechSynthesis.getVoices().length > 0) {
+    doSpeak()
+  } else {
+    window.speechSynthesis.onvoiceschanged = () => {
+      window.speechSynthesis.onvoiceschanged = null
+      doSpeak()
+    }
+  }
+}
 
 const S = { fontFamily: 'Raleway, sans-serif' }
 
@@ -46,7 +88,7 @@ function MarkdownContent({ text, isUser }: { text: string; isUser: boolean }) {
   return <>{els}</>
 }
 
-export type AgentTab = 'dashboard' | 'today' | 'actions' | 'chat' | 'history' | 'settings' | 'queue' | 'patterns'
+export type AgentTab = 'dashboard' | 'today' | 'actions' | 'chat' | 'history' | 'settings' | 'queue' | 'patterns' | 'graph'
 
 interface Props {
   agentId: string
@@ -63,6 +105,7 @@ interface Props {
   settings?: React.ReactNode
   queue?: React.ReactNode
   patterns?: React.ReactNode
+  graph?: React.ReactNode
   commandCenter?: React.ReactNode
 }
 
@@ -75,13 +118,14 @@ const TAB_META: Record<AgentTab, { label: string; icon: React.ElementType }> = {
   settings:  { label: 'Settings',  icon: Settings },
   queue:     { label: 'Queue',     icon: BookMarked },
   patterns:  { label: 'Patterns',  icon: Activity },
+  graph:     { label: 'Graph',     icon: Network },
 }
 
 interface Session { id: string; title?: string; started_at: string; message_count?: number; agent_id: string }
 
 export default function AgentPageLayout({
   agentId, agentName, agentColor, agentIcon, description,
-  tabs, starters = [], dashboard, today, actions, history, settings, queue, patterns, commandCenter,
+  tabs, starters = [], dashboard, today, actions, history, settings, queue, patterns, graph, commandCenter,
 }: Props) {
   const [activeTab, setActiveTab] = useState<AgentTab>(tabs[0] ?? 'dashboard')
   const [chatOpen, setChatOpen] = useState(false)
@@ -92,9 +136,32 @@ export default function AgentPageLayout({
   const [sessions, setSessions] = useState<Session[]>([])
   const [loadingSessions, setLoadingSessions] = useState(false)
 
+  const [voiceOut, setVoiceOut] = useState(false)
+
   const chat = useAgentChat(agentId)
   const bottomRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLTextAreaElement>(null)
+
+  // Speak last response when voice is toggled ON; cancel when toggled OFF
+  const prevVoiceOut = useRef(false)
+  useEffect(() => {
+    if (voiceOut && !prevVoiceOut.current) {
+      const last = [...chat.messages].reverse().find(m => m.role === 'assistant')
+      if (last?.content) speakText(last.content)
+    }
+    if (!voiceOut) window.speechSynthesis?.cancel()
+    prevVoiceOut.current = voiceOut
+  }, [voiceOut]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-speak when a new response finishes streaming
+  const prevStreaming = useRef(false)
+  useEffect(() => {
+    if (prevStreaming.current && !chat.streaming && voiceOut) {
+      const last = [...chat.messages].reverse().find(m => m.role === 'assistant')
+      if (last?.content) speakText(last.content)
+    }
+    prevStreaming.current = chat.streaming
+  }, [chat.streaming, chat.messages, voiceOut])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -232,6 +299,7 @@ export default function AgentPageLayout({
           {activeTab === 'settings' && settings}
           {activeTab === 'queue' && queue}
           {activeTab === 'patterns' && patterns}
+          {activeTab === 'graph' && graph}
           {activeTab === 'chat' && (
             <div style={{ maxWidth: 720, margin: '0 auto' }}>
               <ChatView
@@ -240,6 +308,7 @@ export default function AgentPageLayout({
                 starters={starters} agentColor={agentColor}
                 showToolCalls={showToolCalls} setShowToolCalls={setShowToolCalls}
                 inputRef={inputRef} bottomRef={bottomRef}
+                voiceOut={voiceOut} setVoiceOut={setVoiceOut}
               />
             </div>
           )}
@@ -363,6 +432,7 @@ export default function AgentPageLayout({
                     starters={starters} agentColor={agentColor} compact
                     showToolCalls={showToolCalls} setShowToolCalls={setShowToolCalls}
                     inputRef={inputRef} bottomRef={bottomRef}
+                    voiceOut={voiceOut} setVoiceOut={setVoiceOut}
                   />
                 </div>
               </div>
@@ -375,7 +445,7 @@ export default function AgentPageLayout({
 }
 
 // ── Chat view ─────────────────────────────────────────────────────────────
-function ChatView({ messages, input, setInput, send, streaming, newChat, starters, agentColor, compact = false, showToolCalls, setShowToolCalls, inputRef, bottomRef }: {
+function ChatView({ messages, input, setInput, send, streaming, newChat, starters, agentColor, compact = false, showToolCalls, setShowToolCalls, inputRef, bottomRef, voiceOut, setVoiceOut }: {
   messages: ChatMessage[]
   input: string
   setInput: (v: string) => void
@@ -389,7 +459,44 @@ function ChatView({ messages, input, setInput, send, streaming, newChat, starter
   setShowToolCalls: (v: boolean) => void
   inputRef: React.RefObject<HTMLTextAreaElement | null>
   bottomRef: React.RefObject<HTMLDivElement | null>
+  voiceOut: boolean
+  setVoiceOut: (v: boolean) => void
 }) {
+  const [listening, setListening] = useState(false)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const recogRef = useRef<any>(null)
+  const hasSpeechInput = typeof window !== 'undefined' && ('SpeechRecognition' in window || 'webkitSpeechRecognition' in window)
+
+  const toggleMic = () => {
+    if (!hasSpeechInput) return
+    if (listening) {
+      recogRef.current?.stop()
+      setListening(false)
+      return
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const w = window as any
+    const SR = w.SpeechRecognition ?? w.webkitSpeechRecognition
+    const r = new SR()
+    r.continuous = false
+    r.interimResults = false
+    r.lang = 'en-US'
+    r.onresult = (e: { results: { [k: number]: { [k: number]: { transcript: string } } } }) => {
+      const transcript = e.results[0][0].transcript
+      setInput(input ? `${input} ${transcript}` : transcript)
+    }
+    r.onend = () => setListening(false)
+    r.onerror = () => setListening(false)
+    recogRef.current = r
+    r.start()
+    setListening(true)
+  }
+
+  const toggleVoiceOut = () => {
+    if (voiceOut) window.speechSynthesis?.cancel()
+    setVoiceOut(!voiceOut)
+  }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div style={{ flex: 1, overflowY: 'auto', padding: compact ? '12px 16px' : '0 0 16px' }}>
@@ -449,19 +556,30 @@ function ChatView({ messages, input, setInput, send, streaming, newChat, starter
             value={input}
             onChange={e => setInput(e.target.value)}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() }}}
-            placeholder="Ask the agent…"
+            placeholder={listening ? 'Listening…' : 'Ask the agent…'}
             rows={1}
-            style={{ flex: 1, padding: '9px 12px', borderRadius: 10, resize: 'none', border: '1px solid var(--border)', background: 'var(--faint)', color: 'var(--text)', fontFamily: 'Lato, sans-serif', fontSize: 13, outline: 'none', lineHeight: 1.5, maxHeight: 120, overflowY: 'auto' }}
+            style={{ flex: 1, padding: '9px 12px', borderRadius: 10, resize: 'none', border: `1px solid ${listening ? '#ef4444' : 'var(--border)'}`, background: 'var(--faint)', color: 'var(--text)', fontFamily: 'Lato, sans-serif', fontSize: 13, outline: 'none', lineHeight: 1.5, maxHeight: 120, overflowY: 'auto', transition: 'border-color .2s' }}
           />
+          {/* Mic button */}
+          {hasSpeechInput && (
+            <button onClick={toggleMic} title={listening ? 'Stop listening' : 'Voice input'} style={{ width: 36, height: 36, borderRadius: 10, border: `1px solid ${listening ? '#ef444440' : 'var(--border)'}`, flexShrink: 0, background: listening ? 'rgba(239,68,68,.1)' : 'var(--faint)', color: listening ? '#ef4444' : 'var(--muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all .15s' }}>
+              {listening ? <MicOff size={14} style={{ animation: 'micPulse 1s ease-in-out infinite' }} /> : <Mic size={14} />}
+            </button>
+          )}
+          {/* Speaker toggle */}
+          <button onClick={toggleVoiceOut} title={voiceOut ? 'Voice output on (click to mute)' : 'Voice output off'} style={{ width: 36, height: 36, borderRadius: 10, border: `1px solid ${voiceOut ? `${agentColor}40` : 'var(--border)'}`, flexShrink: 0, background: voiceOut ? `${agentColor}12` : 'var(--faint)', color: voiceOut ? agentColor : 'var(--muted)', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all .15s' }}>
+            {voiceOut ? <Volume2 size={14} /> : <VolumeX size={14} />}
+          </button>
+          {/* Send */}
           <button onClick={() => send()} disabled={!input.trim() || streaming} style={{ width: 36, height: 36, borderRadius: 10, border: 'none', flexShrink: 0, background: input.trim() && !streaming ? agentColor : 'var(--faint)', color: input.trim() && !streaming ? '#fff' : 'var(--muted)', cursor: input.trim() && !streaming ? 'pointer' : 'default', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all .15s' }}>
             {streaming ? <Loader2 size={14} style={{ animation: 'spin .8s linear infinite' }} /> : <Send size={14} />}
           </button>
         </div>
         <p style={{ margin: '6px 0 0', fontSize: 10, color: 'var(--muted)', fontFamily: 'Lato' }}>
-          Enter to send · Shift+Enter for new line
+          Enter to send · Shift+Enter for newline{hasSpeechInput ? ' · Mic for voice' : ''}
         </p>
       </div>
-      <style>{`@keyframes spin { to { transform: rotate(360deg) } }`}</style>
+      <style>{`@keyframes spin { to { transform: rotate(360deg) } } @keyframes micPulse { 0%,100%{opacity:1} 50%{opacity:.4} }`}</style>
     </div>
   )
 }
