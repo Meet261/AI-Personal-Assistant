@@ -231,6 +231,16 @@ export default function Dashboard() {
     fetch('/api/system/health').then(r => r.ok ? r.json() : null).then(d => { if (d) setHealth(d) }).catch(() => {})
   }, [])
 
+  const [live, setLive] = useState<{ tasks: { urgent: number; today: number; overdue: number }; habits: { completed: number; total: number }; trading: { todayPnl: number; todayTrades: number } } | null>(null)
+
+  useEffect(() => {
+    const es = new EventSource('/api/dashboard/stream')
+    es.onmessage = (e) => {
+      try { setLive(JSON.parse(e.data)) } catch { /* ignore */ }
+    }
+    return () => es.close()
+  }, [])
+
   const urgent     = tasks.filter(t => t.priority === 'urgent')
   const high       = tasks.filter(t => t.priority === 'high')
   const todayTasks = tasks.filter(t => t.scheduled_for === today)
@@ -278,6 +288,12 @@ export default function Dashboard() {
               <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'Lato, sans-serif', fontSize: 13, color: 'rgba(255,255,255,.68)' }}>
                 <Layers size={13} /> {projects.length} active projects
               </span>
+              {live && (
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'Lato, sans-serif', fontSize: 13, color: 'rgba(255,255,255,.68)' }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#22c55e', boxShadow: '0 0 6px #22c55e', animation: 'pulse 2s ease-in-out infinite' }} />
+                  Live
+                </span>
+              )}
               <span style={{ width: 1, height: 13, background: 'rgba(255,255,255,.22)' }} />
               <span style={{ display: 'flex', alignItems: 'center', gap: 5, fontFamily: 'Lato, sans-serif', fontSize: 13, color: 'rgba(255,255,255,.68)' }}>
                 <CheckSquare size={13} /> {tasks.length} open tasks
