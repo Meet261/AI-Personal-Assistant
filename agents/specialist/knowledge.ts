@@ -260,27 +260,31 @@ async function _executeKnowledgeAction(action: string, params: Record<string, un
       if (error || !papers?.length) return { ok: false, message: 'No papers found in Supabase' }
 
       const colId = await getOrCreateCollection()
-      let indexed = 0
       const failed: string[] = []
 
-      // Embed in batches of 10 to avoid overwhelming Ollama
+      // Build all doc texts first, then embed in one Jina API call (avoids rate limiting)
+      const docs = papers.map(p => buildPaperDoc(p))
+      const { callJinaEmbed } = await import('../shared/models')
+      const embeddings = await callJinaEmbed(docs)
+
+      // Upsert to ChromaDB in batches of 10
+      let indexed = 0
       for (let i = 0; i < papers.length; i += 10) {
         const batch = papers.slice(i, i + 10)
-        const results = await Promise.allSettled(batch.map(async paper => {
-          const docText  = buildPaperDoc(paper)
-          const embedding = await embed(docText)
+        const batchDocs = docs.slice(i, i + 10)
+        const batchEmbeds = embeddings.slice(i, i + 10)
+        try {
           await chromaUpsert(
             colId,
-            [paper.id],
-            [embedding],
-            [docText],
-            [{ paper_id: paper.id, title: paper.title, authors: paper.authors ?? '', year: String(paper.year ?? '') }]
+            batch.map(p => p.id),
+            batchEmbeds,
+            batchDocs,
+            batch.map(p => ({ paper_id: p.id, title: p.title, authors: p.authors ?? '', year: String(p.year ?? '') }))
           )
-          return paper.title
-        }))
-        for (let j = 0; j < results.length; j++) {
-          if (results[j].status === 'fulfilled') indexed++
-          else failed.push(batch[j].title)
+          indexed += batch.length
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e)
+          for (const p of batch) failed.push(`${p.title} [${msg.slice(0, 80)}]`)
         }
       }
 
