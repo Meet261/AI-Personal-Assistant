@@ -13,8 +13,12 @@ function logActivity(type: string, entity_type: string, entity_title: string, me
 
 async function resolveProject(name: string): Promise<string | null> {
   if (!name) return null
-  const { data } = await supabase.from('projects').select('id,name').ilike('name', `%${name}%`).limit(1)
-  return data?.[0]?.id || null
+  try {
+    const { data } = await supabase.from('projects').select('id,name').ilike('name', `%${name}%`).limit(1)
+    return data?.[0]?.id || null
+  } catch {
+    return null
+  }
 }
 
 export async function executeAssistantAction(action: string, params: Record<string, unknown>) {

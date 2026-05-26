@@ -18,18 +18,26 @@ const supabase = createClient(
 // ── Cache helpers ─────────────────────────────────────────────────────────
 
 async function cacheGet<T>(key: string): Promise<T | null> {
-  const { data } = await supabase
-    .from('email_cache')
-    .select('data')
-    .eq('id', key)
-    .gt('expires_at', new Date().toISOString())
-    .single()
-  return data ? (data.data as T) : null
+  try {
+    const { data } = await supabase
+      .from('email_cache')
+      .select('data')
+      .eq('id', key)
+      .gt('expires_at', new Date().toISOString())
+      .single()
+    return data ? (data.data as T) : null
+  } catch {
+    return null
+  }
 }
 
 async function cacheSet(key: string, value: unknown, ttlSeconds: number) {
-  const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString()
-  await supabase.from('email_cache').upsert({ id: key, data: value, cached_at: new Date().toISOString(), expires_at: expiresAt })
+  try {
+    const expiresAt = new Date(Date.now() + ttlSeconds * 1000).toISOString()
+    await supabase.from('email_cache').upsert({ id: key, data: value, cached_at: new Date().toISOString(), expires_at: expiresAt })
+  } catch {
+    // Cache write failure is non-fatal — caller will re-fetch next time
+  }
 }
 
 // ── SMTP transporter (send) ───────────────────────────────────────────────
