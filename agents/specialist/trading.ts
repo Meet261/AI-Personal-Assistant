@@ -34,22 +34,22 @@ function readCSV(path: string, limit?: number): Record<string, string>[] {
 }
 
 function readAITraderTrades(limit?: number): NormalizedTrade[] {
-  const rows = readCSV(join(AITRADER_BASE, 'logs', 'trades.csv'), limit)
-  return rows
-    .filter(r => r.profit !== '' && r.close_time !== '')
-    .map(r => ({
-      source: 'aitrader' as TradeSource,
-      symbol:      r.symbol ?? '',
-      type:        r.action ?? r.type ?? '',
-      open_time:   r.open_time ?? '',
-      close_time:  r.close_time ?? '',
-      open_price:  r.entry_price ?? r.open_price ?? '',
-      close_price: r.exit_price ?? r.close_price ?? '',
-      volume:      r.lots ?? r.volume ?? '',
-      sl:          '',
-      tp:          '',
-      profit:      r.profit ?? '0',
-    }))
+  const rows = readCSV(join(AITRADER_BASE, 'logs', 'trade_ledger.csv'))
+  const closed = rows.filter(r => r.status === 'CLOSED' && r.profit !== '' && r.close_time !== '')
+  const limited = limit ? closed.slice(-limit) : closed
+  return limited.map(r => ({
+    source: 'aitrader' as TradeSource,
+    symbol:      r.symbol ?? '',
+    type:        r.action ?? '',
+    open_time:   r.open_time ?? '',
+    close_time:  r.close_time ?? '',
+    open_price:  r.entry_price ?? '',
+    close_price: r.exit_price ?? '',
+    volume:      r.lots ?? '',
+    sl:          r.sl ?? '',
+    tp:          r.tp ?? '',
+    profit:      r.profit ?? '0',
+  }))
 }
 
 function readAlchemistTrades(limit?: number): NormalizedTrade[] {
