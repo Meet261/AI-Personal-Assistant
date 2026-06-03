@@ -69,7 +69,7 @@ export async function digestPaper(paperId: string, paperText: string, systemProm
     await supabase.from('research_papers').update({ tags: allTags }).eq('id', paperId)
 
     // Second Haiku call: structured argument extraction
-    extractArguments(paperId, paperText, parsed.summary ?? '').catch(() => {})
+    extractArguments(paperId, paperText, parsed.summary ?? '').catch((e) => console.error('[paper-digester] extractArguments failed:', e))
 
     // Log token usage for budget tracking
     await supabase.from('agent_token_usage').insert({
@@ -78,7 +78,7 @@ export async function digestPaper(paperId: string, paperText: string, systemProm
       input_tokens: Math.round(paperText.slice(0, 12000).length / 4),
       output_tokens: Math.round(raw.length / 4),
       cost_usd: (Math.round(paperText.slice(0, 12000).length / 4) / 1_000_000) * 0.25 + (Math.round(raw.length / 4) / 1_000_000) * 1.25,
-    }).then(() => {})
+    }).then(() => {}, (e) => console.error('[paper-digester] token_usage insert failed:', e))
 
     return { ok: true, summary: parsed.summary, message: `Paper "${paperId}" digested successfully` }
   } catch (e) {
