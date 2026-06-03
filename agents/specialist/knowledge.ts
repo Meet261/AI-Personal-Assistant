@@ -264,7 +264,6 @@ async function _executeKnowledgeAction(action: string, params: Record<string, un
 
       // Build all doc texts first, then embed in one Jina API call (avoids rate limiting)
       const docs = papers.map(p => buildPaperDoc(p))
-      const { callJinaEmbed } = await import('../shared/models')
       const embeddings = await callJinaEmbed(docs)
 
       // Upsert to ChromaDB in batches of 10
