@@ -285,7 +285,6 @@ Provide:
         }
       }
 
-      pairs.sort((a, b) => 0 - 0) // keep insertion order
       const top = pairs.slice(0, 10)
 
       return {
