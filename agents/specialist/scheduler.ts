@@ -95,8 +95,9 @@ export async function executeSchedulerAction(action: string, params: Record<stri
         const { data: task } = await supabase.from('tasks').select('title,description').eq('id', taskId).single()
         const base = (task?.description ?? '').replace(/\s*\[🕐[^\]]+\]$/, '')
         update.description = `${base}${base ? ' ' : ''}[🕐 ${timeSlot}]`.trim()
-        return supabase.from('tasks').update(update).eq('id', taskId)
-          .then(() => ({ ok: true, message: `Scheduled "${task?.title}" for ${params.date} at ${timeSlot}` }))
+        const { error: updateErr } = await supabase.from('tasks').update(update).eq('id', taskId)
+        if (updateErr) return { ok: false, message: updateErr.message }
+        return { ok: true, message: `Scheduled "${task?.title}" for ${params.date} at ${timeSlot}` }
       }
       await supabase.from('tasks').update(update).eq('id', taskId)
       return { ok: true, message: `Scheduled task for ${params.date}` }
