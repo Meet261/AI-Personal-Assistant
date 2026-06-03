@@ -99,58 +99,62 @@ function calcSummary(trades: NormalizedTrade[]) {
 }
 
 export function executeTradingAction(action: string, params: Record<string, unknown>) {
-  const source: TradeSource = (params.source as TradeSource) || 'aitrader'
+  try {
+    const source: TradeSource = (params.source as TradeSource) || 'aitrader'
 
-  switch (action) {
-    case 'get_risk_state': {
-      try {
-        const state = JSON.parse(readFileSync(join(AITRADER_BASE, 'logs', 'risk_state.json'), 'utf-8'))
-        return { ok: true, message: 'Current risk state', data: state }
-      } catch { return { ok: false, message: 'Could not read risk state' } }
-    }
-
-    case 'get_recent_trades': {
-      const limit = (params.limit as number) || 100
-      const rows = getTrades(source, limit)
-      return { ok: true, message: `${rows.length} recent trades`, data: rows }
-    }
-
-    case 'get_today_trades': {
-      const today = new Date().toISOString().slice(0, 10)
-      const allRows = getTrades(source)
-      // Alchemist uses ISO dates, AITrader uses dot-separated YYYY.MM.DD HH:MM:SS
-      const rows = allRows.filter(r => {
-        const ct = r.close_time
-        return ct.startsWith(today) || ct.startsWith(today.replace(/-/g, '.'))
-      })
-      const profits = rows.map(r => parseFloat(r.profit)).filter(p => !isNaN(p))
-      const pnl = profits.reduce((a, b) => a + b, 0)
-      return {
-        ok: true,
-        message: `${rows.length} trades today, P&L $${pnl.toFixed(2)}`,
-        data: {
-          trades: rows,
-          summary: { count: rows.length, pnl: pnl.toFixed(2), wins: profits.filter(p => p > 0).length, losses: profits.filter(p => p <= 0).length },
-        },
+    switch (action) {
+      case 'get_risk_state': {
+        try {
+          const state = JSON.parse(readFileSync(join(AITRADER_BASE, 'logs', 'risk_state.json'), 'utf-8'))
+          return { ok: true, message: 'Current risk state', data: state }
+        } catch { return { ok: false, message: 'Could not read risk state' } }
       }
-    }
 
-    case 'get_performance_summary': {
-      const rows = getTrades(source)
-      const perf = calcSummary(rows)
-      if (!perf) return { ok: true, message: 'No closed trades', data: {} }
-      return { ok: true, message: 'Performance summary', data: perf }
-    }
+      case 'get_recent_trades': {
+        const limit = (params.limit as number) || 100
+        const rows = getTrades(source, limit)
+        return { ok: true, message: `${rows.length} recent trades`, data: rows }
+      }
 
-    case 'get_recent_predictions': {
-      const limit = (params.limit as number) || 30
-      const sym = params.symbol as string | undefined
-      let rows = readCSV(join(AITRADER_BASE, 'logs', 'predictions.csv'), limit * 3)
-      if (sym) rows = rows.filter(r => r.symbol === sym)
-      return { ok: true, message: `${rows.slice(-limit).length} predictions`, data: rows.slice(-limit) }
-    }
+      case 'get_today_trades': {
+        const today = new Date().toISOString().slice(0, 10)
+        const allRows = getTrades(source)
+        // Alchemist uses ISO dates, AITrader uses dot-separated YYYY.MM.DD HH:MM:SS
+        const rows = allRows.filter(r => {
+          const ct = r.close_time
+          return ct.startsWith(today) || ct.startsWith(today.replace(/-/g, '.'))
+        })
+        const profits = rows.map(r => parseFloat(r.profit)).filter(p => !isNaN(p))
+        const pnl = profits.reduce((a, b) => a + b, 0)
+        return {
+          ok: true,
+          message: `${rows.length} trades today, P&L $${pnl.toFixed(2)}`,
+          data: {
+            trades: rows,
+            summary: { count: rows.length, pnl: pnl.toFixed(2), wins: profits.filter(p => p > 0).length, losses: profits.filter(p => p <= 0).length },
+          },
+        }
+      }
 
-    default:
-      return { ok: false, message: `Unknown action: ${action}` }
+      case 'get_performance_summary': {
+        const rows = getTrades(source)
+        const perf = calcSummary(rows)
+        if (!perf) return { ok: true, message: 'No closed trades', data: {} }
+        return { ok: true, message: 'Performance summary', data: perf }
+      }
+
+      case 'get_recent_predictions': {
+        const limit = (params.limit as number) || 30
+        const sym = params.symbol as string | undefined
+        let rows = readCSV(join(AITRADER_BASE, 'logs', 'predictions.csv'), limit * 3)
+        if (sym) rows = rows.filter(r => r.symbol === sym)
+        return { ok: true, message: `${rows.slice(-limit).length} predictions`, data: rows.slice(-limit) }
+      }
+
+      default:
+        return { ok: false, message: `Unknown action: ${action}` }
+    }
+  } catch (err) {
+    return { ok: false, message: `Trading action failed: ${String(err)}` }
   }
 }
